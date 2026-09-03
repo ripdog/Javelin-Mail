@@ -120,12 +120,10 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         reconcileReminderHorizon(DatabaseTransaction& transaction,
                                  const CalendarReminderHorizon& horizon);
-        [[nodiscard]] std::optional<DatabaseError>
-        applyEventDelta(std::string_view accountId, std::string_view calendarState,
-                        std::string_view eventState, const calendar::TimeZoneId& displayTimeZone,
-                        const std::vector<calendar::CalendarEvent>& events,
-                        const std::vector<calendar::Occurrence>& occurrences,
-                        const std::vector<std::string>& destroyedEventIds);
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        advanceUnchangedEventState(std::string_view accountId, std::string_view calendarState,
+                                   std::string_view expectedEventState,
+                                   std::string_view newEventState);
         [[nodiscard]] std::optional<DatabaseError>
         projectEvents(DatabaseTransaction& transaction, std::string_view accountId,
                       std::string_view eventState,

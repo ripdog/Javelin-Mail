@@ -537,7 +537,13 @@ coalescing policy is not the only record of an incomplete presentation. The lega
 `calendar_events.state` field is maintained only as a mirror of Javelin's owned per-account
 `CalendarEvent` cursor: authoritative cursor advances update both atomically, while reminder-only
 `PreserveCursor` materialization reuses the currently owned cursor rather than recording the fetched
-server state. It is not an independent source of synchronization truth.
+server state. A `CalendarEvent/changes` page containing any created, updated, or destroyed event never
+mutates cached occurrences incrementally: event-local `start` values cannot safely place an occurrence
+into display-timezone query windows, so the sync engine performs authoritative server-side range
+rematerialization instead. Only a changes page with no event-object delta may advance the collection
+cursor in place; that compare-and-swap updates known-current query windows and cached event-row cursor
+mirrors atomically and rejects a stale expected cursor. There is no generic local CalendarEvent-delta
+materialization path. The row field is not an independent source of synchronization truth.
 `CalendarInvitationService` consumes that cached Calendar metadata and owns only invitation-specific
 `CalendarEventNotification` reconciliation,
 `ParticipantIdentity` synchronization, and event fetches required to resolve invitations outside the

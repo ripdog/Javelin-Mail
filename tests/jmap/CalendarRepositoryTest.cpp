@@ -226,9 +226,10 @@ TEST_CASE("calendar window freshness advances only from a known materialization 
         "'2026-11-01T00:00:00','Pacific/Auckland','query-unknown',NULL,"
         "'2000-01-01T00:00:00.000Z')")));
 
-    REQUIRE_FALSE(
-        repository.applyEventDelta("a1", "calendar-state-2", "event-state-2", zone, {}, {}, {})
-            .has_value());
+    const auto stateAdvance = repository.advanceUnchangedEventState(
+        "a1", "calendar-state-2", "event-state-1", "event-state-2");
+    REQUIRE(std::holds_alternative<bool>(stateAdvance));
+    CHECK(std::get<bool>(stateAdvance));
 
     const auto advanced = repository.loadWindow("a1", known.start, known.end, zone);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(advanced));
@@ -288,14 +289,27 @@ TEST_CASE("calendar event row state mirrors the owned collection cursor",
         repository.projectEvents(second, "a1", "cursor-2", {projected}, {}, {}).has_value());
     REQUIRE_FALSE(second.commit().has_value());
 
+    const auto advanced =
+        repository.advanceUnchangedEventState("a1", "calendar-3", "cursor-2", "cursor-3");
+    REQUIRE(std::holds_alternative<bool>(advanced));
+    CHECK(std::get<bool>(advanced));
+    const auto stale =
+        repository.advanceUnchangedEventState("a1", "calendar-4", "cursor-2", "cursor-4");
+    REQUIRE(std::holds_alternative<bool>(stale));
+    CHECK_FALSE(std::get<bool>(stale));
+
     QSqlQuery state{connection.database()};
     REQUIRE(state.exec(QStringLiteral(
         "SELECT e.state,s.state FROM calendar_events e JOIN calendar_state_tokens s ON "
         "s.account_id=e.account_id AND s.data_type='CalendarEvent' WHERE e.account_id='a1' AND "
         "e.event_id='e1'")));
     REQUIRE(state.next());
-    CHECK(state.value(0).toString() == QStringLiteral("cursor-2"));
-    CHECK(state.value(1).toString() == QStringLiteral("cursor-2"));
+    CHECK(state.value(0).toString() == QStringLiteral("cursor-3"));
+    CHECK(state.value(1).toString() == QStringLiteral("cursor-3"));
+    const auto calendarState = repository.stateToken("a1", "Calendar");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(calendarState));
+    CHECK(std::get<std::optional<std::string>>(calendarState) ==
+          std::optional<std::string>{"calendar-3"});
 }
 
 TEST_CASE("calendar reminder horizon survives presentation-window eviction",
@@ -535,20 +549,19 @@ TEST_CASE("calendar reminder timing is isolated from presentation timezone mater
           QDateTime::fromString(QStringLiteral("2026-09-02T22:00:00Z"), Qt::ISODate));
 }
 
-TEST_CASE("calendar event deltas drop stale reminder ownership without pruning other reminders",
-          "[jmap][calendar][cache][notification]")
+TEST_CASE("unchanged calendar state advancement preserves daemon reminder ownership",
+          "[jmap][calendar][cache][notification][state]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
     QTemporaryDir directory;
     REQUIRE(directory.isValid());
     auto opened = javelin::jmap::cache::DatabaseConnection::open(
-        {.connectionName = QStringLiteral("calendar-reminder-delta"),
+        {.connectionName = QStringLiteral("calendar-reminder-state-advance"),
          .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
     auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
-    QSqlQuery account{connection.database()};
-    REQUIRE(account.exec(QStringLiteral(
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
         "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
         "('a1','alice@example.test','https://example.test/jmap',1)")));
 
@@ -600,38 +613,27 @@ TEST_CASE("calendar event deltas drop stale reminder ownership without pruning o
                       })
                       .has_value());
 
-    auto changedEvent = firstEvent;
-    changedEvent.start = {.value = "2026-09-03T12:00:00"};
-    auto changedOccurrence = occurrence("first-new", "2026-09-03T12:00:00");
-    changedOccurrence.eventId = "first";
-    changedOccurrence.localEnd = {.value = "2026-09-03T13:00:00"};
-    REQUIRE_FALSE(repository
-                      .applyEventDelta("a1", "calendar-state-1", "event-state-2",
-                                       {.value = "Pacific/Auckland"}, {changedEvent},
-                                       {changedOccurrence}, {})
-                      .has_value());
+    const auto advanced = repository.advanceUnchangedEventState("a1", "calendar-state-2",
+                                                                "event-state-1", "event-state-2");
+    REQUIRE(std::holds_alternative<bool>(advanced));
+    CHECK(std::get<bool>(advanced));
 
     QSqlQuery reminderMembership{connection.database()};
     REQUIRE(reminderMembership.exec(QStringLiteral(
         "SELECT occurrence_id FROM calendar_reminder_occurrences WHERE account_id='a1' "
         "ORDER BY occurrence_id")));
     REQUIRE(reminderMembership.next());
+    CHECK(reminderMembership.value(0).toString() == QStringLiteral("first"));
+    REQUIRE(reminderMembership.next());
     CHECK(reminderMembership.value(0).toString() == QStringLiteral("second"));
     CHECK_FALSE(reminderMembership.next());
 
-    const auto retainedSecond = repository.findEvent("a1", "second");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
-        retainedSecond));
-    CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(retainedSecond)
-              .has_value());
-    const auto changedOccurrences = repository.listEventOccurrences("a1", "first");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Occurrence>>(
-        changedOccurrences));
-    REQUIRE(std::get<std::vector<javelin::jmap::calendar::Occurrence>>(changedOccurrences).size() ==
-            1);
-    CHECK(
-        std::get<std::vector<javelin::jmap::calendar::Occurrence>>(changedOccurrences).front().id ==
-        "first-new");
+    QSqlQuery rowStates{connection.database()};
+    REQUIRE(rowStates.exec(QStringLiteral(
+        "SELECT DISTINCT state FROM calendar_events WHERE account_id='a1' ORDER BY state")));
+    REQUIRE(rowStates.next());
+    CHECK(rowStates.value(0).toString() == QStringLiteral("event-state-2"));
+    CHECK_FALSE(rowStates.next());
 }
 
 TEST_CASE("calendar windows retain occurrences referenced by overlapping windows",
@@ -856,7 +858,10 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == 1);
 
-    REQUIRE_FALSE(repository.applyEventDelta("a1", "c2", "e2-state", zone, {}, {}, {}).has_value());
+    const auto advancedState =
+        repository.advanceUnchangedEventState("a1", "c2", "e1-state", "e2-state");
+    REQUIRE(std::holds_alternative<bool>(advancedState));
+    CHECK(std::get<bool>(advancedState));
     const auto stateAdvancedFirst =
         repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
     const auto stateAdvancedSecond =
@@ -869,41 +874,6 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
               ->eventState == "e2-state");
     CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(stateAdvancedSecond)
               ->eventState == "e2-state");
-
-    auto changedEvent = event("e2", "2026-04-02T10:00:00");
-    changedEvent.title = "Changed event";
-    const auto changedOccurrence = occurrence("e2", "2026-04-02T10:00:00");
-    REQUIRE_FALSE(
-        repository
-            .applyEventDelta("a1", "c2", "e3-state", zone, {changedEvent}, {changedOccurrence}, {})
-            .has_value());
-    const auto staleFirst =
-        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
-    const auto staleSecond =
-        repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
-    CHECK_FALSE(
-        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(staleFirst).has_value());
-    CHECK_FALSE(
-        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(staleSecond).has_value());
-    const auto changedCachedEvent = repository.findEvent("a1", "e2");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
-        changedCachedEvent));
-    REQUIRE(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(changedCachedEvent)
-                .has_value());
-    CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(changedCachedEvent)
-              ->title == "Changed event");
-
-    REQUIRE_FALSE(
-        repository.applyEventDelta("a1", "c2", "e4-state", zone, {}, {}, {"e2"}).has_value());
-    const auto destroyedCachedEvent = repository.findEvent("a1", "e2");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
-        destroyedCachedEvent));
-    CHECK_FALSE(
-        std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(destroyedCachedEvent)
-            .has_value());
-
-    refreshedFirst.eventState = "e4-state";
-    REQUIRE_FALSE(repository.reconcileWindow(refreshedFirst).has_value());
 
     REQUIRE(count.exec(
         QStringLiteral("UPDATE calendar_query_windows SET updated_at=CASE range_start WHEN "
@@ -926,7 +896,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
                                                           .displayTimeZone = zone,
                                                           .queryState =
                                                               "bounded-" + std::to_string(month),
-                                                          .eventState = "e4-state",
+                                                          .eventState = "e2-state",
                                                           .events = {},
                                                           .occurrences = {}};
         REQUIRE_FALSE(repository.reconcileWindow(window).has_value());

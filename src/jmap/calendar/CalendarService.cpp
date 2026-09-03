@@ -3262,10 +3262,12 @@ namespace javelin::jmap::calendar
                         accountId, acceptedCalendarState, changedCalendars->list))
                     co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             }
-            if (const auto cacheError =
-                    repository.applyEventDelta(accountId, acceptedCalendarState,
-                                               eventChanges.newState, displayTimeZone, {}, {}, {}))
+            const auto stateAdvance = repository.advanceUnchangedEventState(
+                accountId, acceptedCalendarState, *eventState, eventChanges.newState);
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&stateAdvance))
                 co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (!std::get<bool>(stateAdvance))
+                co_return summary;
             if (calendarMetadataChanged)
                 ++summary.accountCount;
         }

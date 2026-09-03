@@ -106,6 +106,24 @@ namespace
         value.isOrigin = true;
         return value;
     }
+
+    void projectAuthoritativeEventsForTest(
+        javelin::jmap::cache::CalendarRepository& repository,
+        javelin::jmap::cache::DatabaseConnection& connection, const std::string_view eventState,
+        const std::vector<javelin::jmap::calendar::CalendarEvent>& events,
+        const std::vector<javelin::jmap::calendar::Occurrence>& occurrences)
+    {
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            connection, QStringLiteral("Project authoritative calendar test data"));
+        REQUIRE(
+            std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        REQUIRE_FALSE(
+            repository.projectEvents(transaction, "a1", eventState, events, occurrences, {})
+                .has_value());
+        REQUIRE_FALSE(transaction.commit().has_value());
+    }
 } // namespace
 
 TEST_CASE("calendar metadata mutations project and reconcile server outcomes",
@@ -1284,19 +1302,16 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     }
 
     const auto editable = event();
-    REQUIRE_FALSE(calendars
-                      .applyEventDelta("a1", "calendar-batched", "event-batched", zone, {editable},
-                                       {{.accountId = "a1",
-                                         .id = "event-1",
-                                         .eventId = "event-1",
-                                         .recurrenceId = std::nullopt,
-                                         .localStart = {.value = "2026-07-13T09:00:00"},
-                                         .localEnd = {.value = "2026-07-13T10:00:00"},
-                                         .utcStart = std::nullopt,
-                                         .utcEnd = std::nullopt,
-                                         .allDay = false}},
-                                       {})
-                      .has_value());
+    projectAuthoritativeEventsForTest(calendars, connection, "event-batched", {editable},
+                                      {{.accountId = "a1",
+                                        .id = "event-1",
+                                        .eventId = "event-1",
+                                        .recurrenceId = std::nullopt,
+                                        .localStart = {.value = "2026-07-13T09:00:00"},
+                                        .localEnd = {.value = "2026-07-13T10:00:00"},
+                                        .utcStart = std::nullopt,
+                                        .utcEnd = std::nullopt,
+                                        .allDay = false}});
 
     const auto cachedBeforeFailure = calendars.loadWindow("a1", interval.start, interval.end, zone);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
@@ -2899,22 +2914,18 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
         recurring.attendees[1].participationStatus = "accepted";
         recurring.recurrenceOverrides["2026-07-20T09:00:00"]
             .participantParticipationStatus.insert_or_assign("me", "needs-action");
-        REQUIRE_FALSE(calendars
-                          .applyEventDelta("a1", "calendar-state-1", "event-rsvp-recurring",
-                                           {.value = "Pacific/Auckland"}, {recurring},
-                                           {{.accountId = "a1",
-                                             .id = "event-1::2026-07-20T09:00:00",
-                                             .eventId = "event-1",
-                                             .recurrenceId =
-                                                 javelin::jmap::calendar::LocalDateTime{
-                                                     .value = "2026-07-20T09:00:00"},
-                                             .localStart = {.value = "2026-07-20T09:00:00"},
-                                             .localEnd = {.value = "2026-07-20T10:00:00"},
-                                             .utcStart = std::nullopt,
-                                             .utcEnd = std::nullopt,
-                                             .allDay = false}},
-                                           {})
-                          .has_value());
+        projectAuthoritativeEventsForTest(
+            calendars, connection, "event-rsvp-recurring", {recurring},
+            {{.accountId = "a1",
+              .id = "event-1::2026-07-20T09:00:00",
+              .eventId = "event-1",
+              .recurrenceId =
+                  javelin::jmap::calendar::LocalDateTime{.value = "2026-07-20T09:00:00"},
+              .localStart = {.value = "2026-07-20T09:00:00"},
+              .localEnd = {.value = "2026-07-20T10:00:00"},
+              .utcStart = std::nullopt,
+              .utcEnd = std::nullopt,
+              .allDay = false}});
         transport.results.push_back(identityResponse("mailto:alice@example.test"));
         transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
             .methodResponses =
@@ -3035,24 +3046,21 @@ TEST_CASE("calendar invitation responses use participant identities and RSVP rig
             .createdIds = std::nullopt,
             .sessionState = "session-rsvp-after-remote-update",
         });
-        transport.beforeReturn = [&calendars, invitation]
+        transport.beforeReturn = [&calendars, &connection, invitation]
         {
             auto remotelyUpdated = invitation;
             remotelyUpdated.title = "Organizer changed the title";
-            const auto cacheError =
-                calendars.applyEventDelta("a1", "calendar-state-1", "event-rsvp-remote",
-                                          {.value = "Pacific/Auckland"}, {remotelyUpdated},
-                                          {{.accountId = "a1",
-                                            .id = "event-1",
-                                            .eventId = "event-1",
-                                            .recurrenceId = std::nullopt,
-                                            .localStart = remotelyUpdated.start,
-                                            .localEnd = {.value = "2026-07-13T10:00:00"},
-                                            .utcStart = std::nullopt,
-                                            .utcEnd = std::nullopt,
-                                            .allDay = false}},
-                                          {});
-            REQUIRE_FALSE(cacheError.has_value());
+            projectAuthoritativeEventsForTest(calendars, connection, "event-rsvp-remote",
+                                              {remotelyUpdated},
+                                              {{.accountId = "a1",
+                                                .id = "event-1",
+                                                .eventId = "event-1",
+                                                .recurrenceId = std::nullopt,
+                                                .localStart = remotelyUpdated.start,
+                                                .localEnd = {.value = "2026-07-13T10:00:00"},
+                                                .utcStart = std::nullopt,
+                                                .utcEnd = std::nullopt,
+                                                .allDay = false}});
         };
 
         const auto result = QCoro::waitFor(mutation.respond(settings, "a1",
