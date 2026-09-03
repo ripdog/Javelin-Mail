@@ -1217,14 +1217,22 @@ namespace javelin::jmap::cache
 
         QSqlQuery addMembership{database};
         addMembership.prepare(QStringLiteral(
-            "INSERT INTO calendar_reminder_occurrences(account_id,occurrence_id) VALUES "
-            "(:account,:occurrence)"));
+            "INSERT INTO calendar_reminder_occurrences(account_id,occurrence_id,start_utc,end_utc) "
+            "VALUES (:account,:occurrence,:start_utc,:end_utc)"));
         for (const auto& occurrence : horizon.occurrences)
         {
             addMembership.bindValue(QStringLiteral(":account"),
                                     QString::fromStdString(horizon.accountId));
             addMembership.bindValue(QStringLiteral(":occurrence"),
                                     QString::fromStdString(occurrence.id));
+            addMembership.bindValue(
+                QStringLiteral(":start_utc"),
+                occurrence.utcStart ? QVariant{QString::fromStdString(occurrence.utcStart->value)}
+                                    : QVariant{});
+            addMembership.bindValue(QStringLiteral(":end_utc"),
+                                    occurrence.utcEnd
+                                        ? QVariant{QString::fromStdString(occurrence.utcEnd->value)}
+                                        : QVariant{});
             if (!exec(addMembership, failure,
                       QStringLiteral("Add calendar reminder horizon membership")))
                 return failure;

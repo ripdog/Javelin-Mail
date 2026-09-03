@@ -50,6 +50,17 @@ namespace javelin::jmap::cache::migrations
                             "STRICT"),
                     },
             },
+            MigrationStep{
+                .version = 73,
+                .name = QStringLiteral("calendar_reminder_occurrence_timing"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "ALTER TABLE calendar_reminder_occurrences ADD COLUMN start_utc TEXT"),
+                        QStringLiteral(
+                            "ALTER TABLE calendar_reminder_occurrences ADD COLUMN end_utc TEXT"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

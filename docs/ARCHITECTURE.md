@@ -531,13 +531,16 @@ visible range. Pending invitations retain their own event snapshot for presentat
 invitation reconciliation never advances the authoritative `CalendarEvent` state token or overwrites
 the shared CalendarEvent cache. `CalendarNotificationService` separately owns reminder delivery and a
 bounded daemon reminder horizon. That horizon reuses `CalendarSyncEngine`'s authoritative server-side
-recurrence expansion and stores retention membership in `calendar_reminder_occurrences`; it is not a
-presentation/query window and does not own another CalendarEvent cursor. Presentation-window eviction
-therefore cannot delete an occurrence still needed by the daemon's reminder horizon. Conversely, when
-an event changes, occurrence replacement drops its old reminder membership rather than retaining a
-possibly stale trigger; the notification service queues authoritative horizon rematerialization from
-CalendarEvent state changes and calendar cache commits. For Calendars-capable sessions, push
-subscriptions include the draft-26 `CalendarAlert` pseudo-type; these alerts are event notifications,
+recurrence expansion and stores both reminder eligibility and the horizon-derived UTC trigger timing in
+`calendar_reminder_occurrences`; it is not a presentation/query window and does not own another
+CalendarEvent cursor. Local reminder scans consume only that daemon-owned membership, so stale or
+presentation-only occurrence rows cannot become notification candidates. Presentation-window eviction
+therefore cannot delete an occurrence still needed by the daemon's reminder horizon, and rematerializing
+a floating event for a GUI timezone cannot overwrite the UTC instant used by reminder delivery.
+Conversely, when an event changes, occurrence replacement drops its old reminder membership rather than
+retaining a possibly stale trigger; the notification service queues authoritative horizon
+rematerialization from CalendarEvent state changes and calendar cache commits. For Calendars-capable
+sessions, push subscriptions include the draft-26 `CalendarAlert` pseudo-type; these alerts are event notifications,
 not collection state, so handling them never advances a JMAP state token. The daemon persists each raw
 pushed alert before any follow-up fetch or desktop delivery, then resolves the authoritative event and
 shares the same durable notification identity used by local reminder scans. `CalendarAlert` remains the

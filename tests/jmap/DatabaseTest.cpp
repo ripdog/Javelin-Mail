@@ -198,7 +198,7 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
     QSqlQuery preserved{migrated.database()};
     REQUIRE(preserved.exec(QStringLiteral(
@@ -270,7 +270,7 @@ TEST_CASE("pending calendar invitation migration isolates snapshots from event c
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
     QSqlQuery pending{migrated.database()};
     REQUIRE(pending.exec(
@@ -339,7 +339,7 @@ TEST_CASE("calendar window event state migration leaves legacy materialization u
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
     QSqlQuery columns{migrated.database()};
     REQUIRE(columns.exec(QStringLiteral("PRAGMA table_info(calendar_query_windows)")));
@@ -403,7 +403,7 @@ TEST_CASE("durable calendar alert push migration cascades queued alerts with the
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
     QSqlQuery queue{migrated.database()};
     REQUIRE(queue.exec(QStringLiteral(
@@ -447,11 +447,11 @@ TEST_CASE("calendar reminder horizon migration cascades retention with its owner
         REQUIRE(fixture.open());
 
         const auto currentRunner = javelin::jmap::cache::createDefaultMigrationRunner();
-        const auto reminderHorizon = std::ranges::find_if(
-            currentRunner.steps(), [](const auto& step) { return step.version == 72; });
-        REQUIRE(reminderHorizon != currentRunner.steps().end());
+        const auto reminderTiming = std::ranges::find_if(currentRunner.steps(), [](const auto& step)
+                                                         { return step.version == 73; });
+        REQUIRE(reminderTiming != currentRunner.steps().end());
         std::vector<javelin::jmap::cache::MigrationStep> legacySteps{currentRunner.steps().begin(),
-                                                                     reminderHorizon};
+                                                                     reminderTiming};
         const javelin::jmap::cache::MigrationRunner legacyRunner{std::move(legacySteps)};
         REQUIRE_FALSE(legacyRunner.migrate(fixture).has_value());
 
@@ -471,6 +471,13 @@ TEST_CASE("calendar reminder horizon migration cascades retention with its owner
             "start_utc,end_utc,local_start,local_end,is_all_day) VALUES "
             "('owner','event-1','event-1',NULL,'2026-09-02T22:00:00Z',"
             "'2026-09-02T23:00:00Z','2026-09-03T10:00:00','2026-09-03T11:00:00',0)")));
+        REQUIRE(seed.exec(QStringLiteral(
+            "INSERT INTO calendar_reminder_horizons(account_id,range_start,range_end,"
+            "display_time_zone) VALUES('owner','2026-09-02T00:00:00','2026-12-03T00:00:00',"
+            "'Pacific/Auckland')")));
+        REQUIRE(seed.exec(
+            QStringLiteral("INSERT INTO calendar_reminder_occurrences(account_id,occurrence_id) "
+                           "VALUES('owner','event-1')")));
         seed.finish();
         fixture.close();
     }
@@ -483,16 +490,15 @@ TEST_CASE("calendar reminder horizon migration cascades retention with its owner
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
-    QSqlQuery horizon{migrated.database()};
-    REQUIRE(horizon.exec(QStringLiteral(
-        "INSERT INTO calendar_reminder_horizons(account_id,range_start,range_end,"
-        "display_time_zone) VALUES('owner','2026-09-02T00:00:00','2026-12-03T00:00:00',"
-        "'Pacific/Auckland')")));
-    REQUIRE(horizon.exec(
-        QStringLiteral("INSERT INTO calendar_reminder_occurrences(account_id,occurrence_id) "
-                       "VALUES('owner','event-1')")));
+    QSqlQuery migratedTiming{migrated.database()};
+    REQUIRE(migratedTiming.exec(QStringLiteral(
+        "SELECT start_utc,end_utc FROM calendar_reminder_occurrences WHERE account_id='owner' AND "
+        "occurrence_id='event-1'")));
+    REQUIRE(migratedTiming.next());
+    CHECK(migratedTiming.value(0).isNull());
+    CHECK(migratedTiming.value(1).isNull());
 
     QSqlQuery removeOwner{migrated.database()};
     REQUIRE(removeOwner.exec(QStringLiteral("DELETE FROM accounts WHERE account_id='owner'")));
@@ -558,7 +564,7 @@ TEST_CASE("legacy mail notification state is discarded without touching cached m
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
     QSqlQuery email{migrated.database()};
     REQUIRE(email.exec(QStringLiteral(
@@ -633,7 +639,7 @@ TEST_CASE(
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
     QSqlQuery active{migrated.database()};
     REQUIRE(active.exec(QStringLiteral(
@@ -727,7 +733,7 @@ TEST_CASE("mutation journal retention migrates and follows durable owners",
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 72);
+    CHECK(migrated.schemaVersion() == 73);
 
     QSqlQuery retained{migrated.database()};
     REQUIRE(retained.exec(

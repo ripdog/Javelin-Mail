@@ -300,14 +300,15 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{database};
         query.prepare(QStringLiteral(
-            "SELECT o.account_id,o.occurrence_id,o.event_id,o.start_utc,o.end_utc,e.title,"
-            "e.document_json,a.owner_account_id,o.recurrence_id FROM calendar_occurrences o JOIN "
-            "calendar_events "
-            "e ON e.account_id=o.account_id AND e.event_id=o.event_id JOIN accounts a ON "
-            "a.account_id=o.account_id WHERE EXISTS (SELECT 1 FROM "
-            "calendar_event_calendars ec JOIN calendars c ON c.account_id=ec.account_id AND "
-            "c.calendar_id=ec.calendar_id WHERE ec.account_id=o.account_id AND "
-            "ec.event_id=o.event_id AND c.is_subscribed=1) ORDER BY o.start_utc"));
+            "SELECT o.account_id,o.occurrence_id,o.event_id,r.start_utc,r.end_utc,e.title,"
+            "e.document_json,a.owner_account_id,o.recurrence_id FROM calendar_reminder_occurrences "
+            "r JOIN calendar_occurrences o ON o.account_id=r.account_id AND "
+            "o.occurrence_id=r.occurrence_id JOIN calendar_events e ON e.account_id=o.account_id "
+            "AND e.event_id=o.event_id JOIN accounts a ON a.account_id=o.account_id WHERE EXISTS "
+            "(SELECT 1 FROM calendar_event_calendars ec JOIN calendars c ON "
+            "c.account_id=ec.account_id AND c.calendar_id=ec.calendar_id WHERE "
+            "ec.account_id=o.account_id AND ec.event_id=o.event_id AND c.is_subscribed=1) ORDER BY "
+            "r.start_utc"));
         if (!query.exec())
         {
             database.rollback();
