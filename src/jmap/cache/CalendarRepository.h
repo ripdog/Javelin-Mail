@@ -42,6 +42,12 @@ namespace javelin::jmap::cache
         PreserveCursor,
     };
 
+    enum class CalendarOccurrenceReplacement
+    {
+        PreserveMissing,
+        Authoritative,
+    };
+
     struct CalendarAccount
     {
         std::string ownerAccountId;
@@ -131,7 +137,9 @@ namespace javelin::jmap::cache
                       const std::vector<calendar::Occurrence>& replacementOccurrences,
                       std::span<const std::string> destroyedEventIds,
                       CalendarEventStatePersistence statePersistence =
-                          CalendarEventStatePersistence::AdvanceCursor);
+                          CalendarEventStatePersistence::AdvanceCursor,
+                      CalendarOccurrenceReplacement occurrenceReplacement =
+                          CalendarOccurrenceReplacement::PreserveMissing);
 
         [[nodiscard]] std::variant<std::optional<CalendarWindow>, DatabaseError>
         loadWindow(std::string_view accountId, const calendar::LocalDateTime& start,
