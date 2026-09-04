@@ -987,44 +987,6 @@ namespace javelin::jmap::cache
         return result;
     }
 
-    std::optional<DatabaseError>
-    CalendarRepository::invalidateEventWindows(DatabaseTransaction& transaction,
-                                               const std::string_view accountId,
-                                               const std::span<const std::string> eventIds)
-    {
-        if (const auto error = m_connection.validate())
-            return error;
-        if (!transaction.isActive() || &transaction.connection() != &m_connection)
-        {
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message =
-                    QStringLiteral("Calendar window invalidation requires a matching transaction"),
-            };
-        }
-        if (eventIds.empty())
-            return std::nullopt;
-
-        QSqlQuery remove{m_connection.database()};
-        remove.prepare(QStringLiteral(
-            "DELETE FROM calendar_query_windows WHERE account_id=:account AND EXISTS (SELECT 1 "
-            "FROM calendar_window_occurrences w JOIN calendar_occurrences o ON "
-            "o.account_id=w.account_id AND o.occurrence_id=w.occurrence_id WHERE "
-            "w.account_id=calendar_query_windows.account_id AND "
-            "w.range_start=calendar_query_windows.range_start AND "
-            "w.range_end=calendar_query_windows.range_end AND "
-            "w.display_time_zone=calendar_query_windows.display_time_zone AND o.event_id=:event)"));
-        for (const auto& eventId : eventIds)
-        {
-            remove.bindValue(QStringLiteral(":account"),
-                             QString::fromStdString(std::string{accountId}));
-            remove.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
-            if (!remove.exec())
-                return queryError(QStringLiteral("Invalidate calendar event windows"), remove);
-        }
-        return std::nullopt;
-    }
-
     std::optional<DatabaseError> CalendarRepository::advanceEventWindows(
         DatabaseTransaction& transaction, const std::string_view accountId,
         const std::string_view oldState, const std::string_view newState)

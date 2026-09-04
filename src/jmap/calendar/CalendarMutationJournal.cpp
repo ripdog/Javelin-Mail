@@ -169,9 +169,9 @@ namespace javelin::jmap::calendar
             if (const auto error = transaction.append(std::get<sync::MutationRecord>(generic)))
                 return error;
         }
-        if (const auto error = m_calendar.invalidateEventWindows(transaction.cacheTransaction(),
-                                                                 accountId, destroyedIds))
-            return error;
+        // Destroying an event removes only that event's cached occurrences and window
+        // memberships. Keep the owning query windows so unrelated events remain renderable while
+        // the mutation is in flight.
         if (const auto error =
                 m_calendar.projectEvents(transaction.cacheTransaction(), accountId, eventState,
                                          projectedEvents, nonRecurringOccurrences, destroyedIds))

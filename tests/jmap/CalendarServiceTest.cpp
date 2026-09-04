@@ -2528,14 +2528,19 @@ TEST_CASE("calendar event deletion rematerializes the visible range without drop
         [&]
         {
             ++projectionNotifications;
-            const auto snapshot =
-                calendars.loadRangeSnapshot("a1", interval.start, interval.end, zone);
-            REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(snapshot));
-            const auto& window = std::get<javelin::jmap::cache::CalendarWindow>(snapshot);
-            CHECK(std::ranges::none_of(window.events,
+            const auto cachedWindow =
+                calendars.loadWindow("a1", interval.start, interval.end, zone);
+            REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+                cachedWindow));
+            const auto& window =
+                std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(cachedWindow);
+            REQUIRE(window.has_value());
+            CHECK(std::ranges::none_of(window->events,
                                        [](const auto& value) { return value.id == "event-1"; }));
-            CHECK(std::ranges::any_of(window.events,
+            CHECK(std::ranges::any_of(window->events,
                                       [](const auto& value) { return value.id == "event-2"; }));
+            CHECK(window->occurrences.size() == 1);
+            CHECK(window->occurrences.front().eventId == "event-2");
         }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
@@ -2561,6 +2566,40 @@ TEST_CASE("calendar event deletion rematerializes the visible range without drop
     REQUIRE(window.occurrences.size() == 1);
     CHECK(window.events.front().id == "event-2");
     CHECK(window.occurrences.front().eventId == "event-2");
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-2","newState":"event-state-3","created":{},"updated":{},"destroyed":["event-2"],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-delete-without-range",
+    });
+    const auto deletedWithoutRange =
+        QCoro::waitFor(mutation.remove({.sessionUrl = "https://example.test/.well-known/jmap",
+                                        .loginEmail = "alice@example.test",
+                                        .apiKey = "secret"},
+                                       "a1",
+                                       {.accountId = "a1",
+                                        .eventId = "event-2",
+                                        .calendarIds = {"work"},
+                                        .operationGroupId = std::nullopt,
+                                        .ifInState = std::nullopt,
+                                        .materialization = std::nullopt}));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(deletedWithoutRange));
+    CHECK_FALSE(std::get<javelin::jmap::calendar::CommittedMutation>(deletedWithoutRange)
+                    .receipt.incompleteMaterialization);
+    const auto cachedWithoutRange = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        cachedWithoutRange));
+    const auto& windowWithoutRange =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(cachedWithoutRange);
+    REQUIRE(windowWithoutRange.has_value());
+    CHECK(windowWithoutRange->eventState == "event-state-3");
+    CHECK(windowWithoutRange->events.empty());
+    CHECK(windowWithoutRange->occurrences.empty());
 }
 
 TEST_CASE("rejected recurring calendar deletion restores materialized occurrences",
@@ -2665,17 +2704,14 @@ TEST_CASE("rejected recurring calendar deletion restores materialized occurrence
     });
     transport.beforeReturn = [&]
     {
-        const auto projected =
-            calendars.loadRangeSnapshot("a1", interval.start, interval.end, zone);
-        REQUIRE(std::holds_alternative<javelin::jmap::cache::CalendarWindow>(projected));
-        const auto& window = std::get<javelin::jmap::cache::CalendarWindow>(projected);
-        CHECK(window.events.empty());
-        CHECK(window.occurrences.empty());
-        const auto invalidated = calendars.loadWindow("a1", interval.start, interval.end, zone);
-        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
-            invalidated));
-        CHECK_FALSE(
-            std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(invalidated).has_value());
+        const auto projected = calendars.loadWindow("a1", interval.start, interval.end, zone);
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(projected));
+        const auto& window =
+            std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(projected);
+        REQUIRE(window.has_value());
+        CHECK(window->events.empty());
+        CHECK(window->occurrences.empty());
     };
 
     javelin::jmap::calendar::CalendarCacheReader reader{connection};
@@ -2745,11 +2781,14 @@ TEST_CASE("rejected recurring calendar deletion restores materialized occurrence
     const auto& rangeAfterSecondRejection =
         std::get<javelin::jmap::cache::CalendarWindow>(restoredWithoutRange);
     CHECK(rangeAfterSecondRejection.occurrences.size() == 2);
-    const auto invalidated = calendars.loadWindow("a1", interval.start, interval.end, zone);
-    REQUIRE(
-        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(invalidated));
-    CHECK_FALSE(
-        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(invalidated).has_value());
+    const auto restoredCachedWindow =
+        calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        restoredCachedWindow));
+    const auto& restoredCached =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(restoredCachedWindow);
+    REQUIRE(restoredCached.has_value());
+    CHECK(restoredCached->occurrences.size() == 2);
 }
 
 TEST_CASE("calendar invitation responses use participant identities and RSVP rights",

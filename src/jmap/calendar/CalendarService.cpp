@@ -1264,6 +1264,12 @@ namespace javelin::jmap::calendar
                         !projectedEvent.recurrenceOverrides.empty();
                 }
 
+                if (record.kind == CalendarMutationKind::Destroy)
+                {
+                    // The optimistic destroy already removes the event from every materialized
+                    // window without disturbing sibling membership, so those windows remain exact.
+                    continue;
+                }
                 if (record.kind != CalendarMutationKind::Update || !record.baseDocument.has_value())
                 {
                     existingWindowsRemainMaterialized = false;
