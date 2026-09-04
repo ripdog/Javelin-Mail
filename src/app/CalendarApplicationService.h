@@ -155,6 +155,7 @@ namespace javelin::app
         {
             VisibleCalendarRange range;
             bool authoritative = false;
+            bool refreshesMetadata = false;
             std::uint64_t materializationEpoch = 0;
             QFuture<javelin::jmap::calendar::CalendarRefreshResult> future;
             std::shared_ptr<QPromise<javelin::jmap::calendar::CalendarRefreshResult>> promise;

@@ -4193,6 +4193,7 @@ namespace javelin::app
         {
             const auto activeRange = active->second.range;
             const bool activeAuthoritative = active->second.authoritative;
+            const bool activeRefreshesMetadata = active->second.refreshesMetadata;
             const auto activeMaterializationEpoch = active->second.materializationEpoch;
             auto future = active->second.future;
             auto activeResult = co_await qCoro(future).result();
@@ -4200,8 +4201,8 @@ namespace javelin::app
             const auto materializationEpoch =
                 currentEpoch == m_calendarMaterializationEpochs.end() ? 0 : currentEpoch->second;
             if (sameRange(activeRange, requestedRange) &&
-                (!forceRefresh ||
-                 (activeAuthoritative && activeMaterializationEpoch == materializationEpoch)))
+                (!forceRefresh || (activeAuthoritative && activeRefreshesMetadata &&
+                                   activeMaterializationEpoch == materializationEpoch)))
                 co_return activeResult;
 
             const auto desired = m_visibleCalendarRanges.find(ownerAccountId);
@@ -4256,12 +4257,16 @@ namespace javelin::app
         }
 
         const ForegroundWorkScope foreground{m_workScheduler};
+        // A user-requested refresh is the authoritative cache-repair path for both Calendar
+        // metadata and CalendarEvent materialization. The metadata-ready flag only suppresses
+        // redundant background reads; it must never turn an explicit refresh into an event-only
+        // refresh.
         const bool refreshCalendarMetadata =
-            !m_calendarMetadataReadyOwners.contains(ownerAccountId);
-        // A user-requested refresh is also the cache-repair path. CalendarEvent/changes can
-        // legitimately report no changes when the collection token is current even if local
-        // occurrence materialization is incomplete, so an explicit refresh must rematerialize
-        // the visible range authoritatively. Push/catch-up work remains incremental.
+            forceRefresh || !m_calendarMetadataReadyOwners.contains(ownerAccountId);
+        // CalendarEvent/changes can legitimately report no changes when the collection token is
+        // current even if local occurrence materialization is incomplete, so an explicit refresh
+        // must rematerialize the visible range authoritatively. Push/catch-up work remains
+        // incremental.
         const bool useIncrementalRefresh = cachedRangeAvailable && catchUpRequired && !forceRefresh;
         const auto currentEpoch = m_calendarMaterializationEpochs.find(ownerAccountId);
         const auto materializationEpoch =
@@ -4272,6 +4277,7 @@ namespace javelin::app
         m_calendarRangeRefreshesInFlight.insert_or_assign(
             ownerAccountId, RangeRefreshFlight{.range = requestedRange,
                                                .authoritative = !useIncrementalRefresh,
+                                               .refreshesMetadata = refreshCalendarMetadata,
                                                .materializationEpoch = materializationEpoch,
                                                .future = future,
                                                .promise = promise});

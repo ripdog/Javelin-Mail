@@ -648,6 +648,97 @@ TEST_CASE("calendar metadata refresh is independent from visible range materiali
                                [](const auto& call) { return call.name == "Calendar/get"; }));
 }
 
+TEST_CASE("authoritative calendar range refresh replaces stale metadata at the same state",
+          "[jmap][calendar][sync][metadata]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-forced-metadata-refresh"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const javelin::jmap::calendar::Calendar stale{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadItems = true},
+    };
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {stale}).has_value());
+
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"c1","list":[{"id":"work","name":"Work","sortOrder":0,"isSubscribed":true,"isVisible":true,"isDefault":true,"timeZone":"Pacific/Auckland","defaultAlertsWithTime":{"default-10m":{"@type":"Alert","action":"display","trigger":{"@type":"OffsetTrigger","relativeTo":"start","offset":"-PT10M"}}},"defaultAlertsWithoutTime":{},"myRights":{"mayReadItems":true}}],"notFound":[]})",
+              .callId = "calendar-get"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"q1","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+              .callId = "calendar-event-query"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"qb1","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+              .callId = "calendar-base-event-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s2"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses = {{.name = "CalendarEvent/get",
+                             .arguments =
+                                 R"({"accountId":"a1","state":"e1","list":[],"notFound":[]})",
+                             .callId = "calendar-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s2"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses = {{.name = "CalendarEvent/get",
+                             .arguments =
+                                 R"({"accountId":"a1","state":"e1","list":[],"notFound":[]})",
+                             .callId = "calendar-base-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s2"});
+
+    javelin::jmap::calendar::CalendarProtocolClient protocol{connection, transport};
+    javelin::jmap::calendar::CalendarSyncEngine sync{connection, protocol};
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://example.test/.well-known/jmap",
+        .loginEmail = "alice@example.test",
+        .apiKey = "secret"};
+
+    const auto refreshed = QCoro::waitFor(sync.refresh(
+        settings, "a1",
+        {.start = {.value = "2026-09-01T00:00:00"}, .end = {.value = "2026-10-01T00:00:00"}},
+        {.value = "Pacific/Auckland"}, true));
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(refreshed));
+    CHECK(
+        std::get<javelin::jmap::calendar::RefreshedRange>(refreshed).calendarMetadataAuthoritative);
+    REQUIRE_FALSE(transport.requests.empty());
+    CHECK(std::ranges::any_of(transport.requests.front().envelope.methodCalls,
+                              [](const auto& call) { return call.name == "Calendar/get"; }));
+
+    const auto listed = calendars.listCalendars("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(listed));
+    const auto& values = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+    REQUIRE(values.size() == 1);
+    REQUIRE(values.front().defaultAlertsWithTime.contains("default-10m"));
+    REQUIRE(values.front().defaultAlertsWithTime.at("default-10m").offset.has_value());
+    CHECK(values.front().defaultAlertsWithTime.at("default-10m").offset->value == "-PT10M");
+}
+
 TEST_CASE("calendar reminder horizon respects the server expansion duration limit",
           "[jmap][calendar][service][notification]")
 {
