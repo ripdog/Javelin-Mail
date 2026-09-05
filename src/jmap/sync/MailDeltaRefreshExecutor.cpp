@@ -1431,37 +1431,26 @@ namespace javelin::jmap::sync
         const bool continueEmail =
             parsed.emailChanges.has_value() &&
             (parsed.emailChanges->hasMoreChanges || parsed.emailNeedsContinuation);
-        const MailDeltaRefreshRequest continuation{
+        summary.continuation = MailDeltaRefreshRequest{
             .mailbox = parsed.mailboxChanges.has_value() &&
                        (parsed.mailboxChanges->hasMoreChanges || parsed.mailboxNeedsContinuation),
             .email = continueEmail,
         };
-        if (continuation.mailbox || continuation.email)
-        {
-            const auto continued =
-                co_await refresh(accountId, continuation, remoteAccountId,
-                                 continueEmail ? notificationBaselineMailboxIds : std::nullopt);
-            if (const auto* error = std::get_if<OperationError>(&continued))
-                co_return *error;
-            const auto& next = std::get<MailDeltaRefreshSummary>(continued);
-            mergeSummary(summary, next);
-        }
-        if (summary.superseded)
-            co_return summary;
         if (summary.emailNeedsFullRefresh && request.email)
-        {
-            const auto rebaseline = co_await rebaselineAccountEmails(
-                m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId,
-                remoteAccountId, emailState, notificationBaselineMailboxIds);
-            if (const auto* error = std::get_if<OperationError>(&rebaseline))
-                co_return *error;
-            const auto& rebaselineSummary = std::get<MailDeltaRefreshSummary>(rebaseline);
-            summary.emailNeedsFullRefresh = false;
-            mergeSummary(summary, rebaselineSummary);
-            if (!rebaselineSummary.superseded)
-                summary.mailboxQueriesNeedReconciliation = true;
-        }
+            summary.emailRebaselineExpectedState = emailState;
         co_return summary;
+    }
+
+    QCoro::Task<MailDeltaRefreshResult> MailDeltaRefreshExecutor::rebaselineEmail(
+        std::string accountId, std::optional<std::string> expectedState,
+        std::string remoteAccountId,
+        std::optional<std::vector<std::string>> notificationBaselineMailboxIds) const
+    {
+        if (remoteAccountId.empty())
+            remoteAccountId = accountId;
+        co_return co_await rebaselineAccountEmails(m_databaseConnection, m_methodCaller,
+                                                   m_apiRequestContext, accountId, remoteAccountId,
+                                                   expectedState, notificationBaselineMailboxIds);
     }
 
 } // namespace javelin::jmap::sync

@@ -36,6 +36,13 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedMailboxIds;
         std::vector<std::string> queryAffectedMailboxIds;
         std::vector<std::string> insertedEmailIds;
+        // A normal refresh call performs at most one committed delta page. Remaining pagination is
+        // explicit demand for the application coordinator so it can publish this page before the
+        // next network await.
+        MailDeltaRefreshRequest continuation;
+        // A collection-history gap is recovered separately for the same reason. The expected state
+        // is the cursor observed by the failed delta and fences the atomic rebaseline promotion.
+        std::optional<std::string> emailRebaselineExpectedState;
     };
 
     using MailDeltaRefreshResult = std::variant<MailDeltaRefreshSummary, OperationError>;
@@ -55,6 +62,11 @@ namespace javelin::jmap::sync
                 std::string remoteAccountId = {},
                 std::optional<std::vector<std::string>> notificationBaselineMailboxIds =
                     std::nullopt) const;
+        [[nodiscard]] QCoro::Task<MailDeltaRefreshResult>
+        rebaselineEmail(std::string accountId, std::optional<std::string> expectedState,
+                        std::string remoteAccountId = {},
+                        std::optional<std::vector<std::string>> notificationBaselineMailboxIds =
+                            std::nullopt) const;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;

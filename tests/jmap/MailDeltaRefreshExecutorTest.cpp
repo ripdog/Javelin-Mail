@@ -129,6 +129,77 @@ namespace
         };
     }
 
+    void mergeRefreshSummary(javelin::jmap::sync::MailDeltaRefreshSummary& destination,
+                             const javelin::jmap::sync::MailDeltaRefreshSummary& source)
+    {
+        const auto appendUnique = [](auto& target, const auto& values)
+        {
+            for (const auto& value : values)
+            {
+                if (std::ranges::find(target, value) == target.end())
+                    target.push_back(value);
+            }
+        };
+        destination.mailboxChanged = destination.mailboxChanged || source.mailboxChanged;
+        destination.emailChanged = destination.emailChanged || source.emailChanged;
+        destination.mailboxNeedsFullRefresh =
+            destination.mailboxNeedsFullRefresh || source.mailboxNeedsFullRefresh;
+        destination.emailNeedsFullRefresh =
+            destination.emailNeedsFullRefresh || source.emailNeedsFullRefresh;
+        destination.mailboxQueriesNeedReconciliation =
+            destination.mailboxQueriesNeedReconciliation || source.mailboxQueriesNeedReconciliation;
+        destination.notificationEventsCreated =
+            destination.notificationEventsCreated || source.notificationEventsCreated;
+        destination.notificationBaselineEstablished =
+            destination.notificationBaselineEstablished || source.notificationBaselineEstablished;
+        destination.superseded = destination.superseded || source.superseded;
+        appendUnique(destination.changedMailboxIds, source.changedMailboxIds);
+        appendUnique(destination.queryAffectedMailboxIds, source.queryAffectedMailboxIds);
+        appendUnique(destination.insertedEmailIds, source.insertedEmailIds);
+    }
+
+    [[nodiscard]] javelin::jmap::sync::MailDeltaRefreshResult refreshToCompletion(
+        javelin::jmap::sync::MailDeltaRefreshExecutor& executor, std::string accountId,
+        javelin::jmap::sync::MailDeltaRefreshRequest request, std::string remoteAccountId = {},
+        std::optional<std::vector<std::string>> notificationBaselineMailboxIds = std::nullopt)
+    {
+        javelin::jmap::sync::MailDeltaRefreshSummary aggregate;
+        std::optional<std::string> emailRebaselineExpectedState;
+        while (request.mailbox || request.email)
+        {
+            const auto baseline = request.email ? notificationBaselineMailboxIds : std::nullopt;
+            auto step =
+                QCoro::waitFor(executor.refresh(accountId, request, remoteAccountId, baseline));
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&step))
+                return *error;
+            const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(step);
+            mergeRefreshSummary(aggregate, summary);
+            if (summary.emailRebaselineExpectedState.has_value())
+                emailRebaselineExpectedState = summary.emailRebaselineExpectedState;
+            if (summary.superseded)
+                return aggregate;
+            request = summary.continuation;
+        }
+
+        if (emailRebaselineExpectedState.has_value())
+        {
+            auto rebaseline = QCoro::waitFor(
+                executor.rebaselineEmail(accountId, emailRebaselineExpectedState, remoteAccountId,
+                                         notificationBaselineMailboxIds));
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&rebaseline))
+                return *error;
+            const auto& summary =
+                std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(rebaseline);
+            mergeRefreshSummary(aggregate, summary);
+            if (!summary.superseded)
+            {
+                aggregate.emailNeedsFullRefresh = false;
+                aggregate.mailboxQueriesNeedReconciliation = true;
+            }
+        }
+        return aggregate;
+    }
+
     [[nodiscard]] javelin::jmap::domain::Mailbox
     mailbox(const std::string& id, const std::uint64_t unread,
             std::optional<std::string> role = std::nullopt)
@@ -724,7 +795,7 @@ TEST_CASE("recoverable Email gap preserves a valid Mailbox transition",
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
     const auto result =
-        QCoro::waitFor(executor.refresh("account-1", {.mailbox = true, .email = true}));
+        refreshToCompletion(executor, "account-1", {.mailbox = true, .email = true});
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
@@ -774,7 +845,7 @@ TEST_CASE("account Email rebaseline reconciles cached mail before advancing stat
         javelin::jmap::api::MethodCaller caller{transport};
         javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                                requestContext()};
-        const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+        const auto result = refreshToCompletion(executor, "account-1", {.email = true});
 
         REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
         const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
@@ -842,7 +913,7 @@ TEST_CASE("account Email rebaseline notifies a retained Email whose prior state 
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
-    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true});
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
@@ -885,7 +956,7 @@ TEST_CASE("rebaseline notification failure rolls back the recovered Email cursor
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
-    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true});
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
 
     javelin::jmap::cache::SyncStateRepository states{database.connection};
@@ -929,7 +1000,7 @@ TEST_CASE("account Email rebaseline removes locally retained notFound mail befor
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
-    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true});
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
@@ -994,7 +1065,7 @@ TEST_CASE("account Email rebaseline reapplies active optimistic mutations",
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
-    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true});
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto cachedResult = emails.find("account-1", "email-1");
@@ -1041,7 +1112,7 @@ TEST_CASE("account Email rebaseline is superseded by a concurrent Email mutation
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
-    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true});
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
@@ -1101,7 +1172,7 @@ TEST_CASE("account Email rebaseline retries a bounded pass when Email state adva
     };
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller, context};
-    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true});
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     REQUIRE(transport.requests.size() == 3);
@@ -1224,8 +1295,8 @@ TEST_CASE("notification baseline completion survives Email changes fallback",
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
 
-    const auto result = QCoro::waitFor(
-        executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true}, {},
+                                            std::vector<std::string>{"inbox"});
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
     CHECK(summary.notificationBaselineEstablished);
@@ -1268,8 +1339,8 @@ TEST_CASE("Email rebaseline keeps already-active mailbox notifications during se
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
 
-    const auto result = QCoro::waitFor(executor.refresh(
-        "account-1", {.email = true}, {}, std::vector<std::string>{"inbox", "projects"}));
+    const auto result = refreshToCompletion(executor, "account-1", {.email = true}, {},
+                                            std::vector<std::string>{"inbox", "projects"});
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
     CHECK(summary.notificationBaselineEstablished);

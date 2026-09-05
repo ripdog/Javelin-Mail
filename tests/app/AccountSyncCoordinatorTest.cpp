@@ -1,4 +1,5 @@
 #include "app/account/AccountSyncCoordinator.h"
+#include "app/MailNotificationService.h"
 #include "app/WorkScheduler.h"
 #include "app/account/EndpointRetryGate.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -80,6 +81,8 @@ namespace
         std::size_t emailRebaselineRequests = 0;
         std::size_t transientEmailFailuresRemaining = 0;
         std::size_t recoverableEmailGapsRemaining = 0;
+        bool nextEmailDeltaCreatesPagedNotification = false;
+        bool failPagedEmailContinuation = false;
         bool notificationCommittedBeforePresentation = false;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
@@ -97,6 +100,14 @@ namespace
             if (emailDelta)
             {
                 ++emailDeltaAttempts;
+                if (failPagedEmailContinuation)
+                {
+                    failPagedEmailContinuation = false;
+                    co_return javelin::jmap::api::TransportError{
+                        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+                        .message = "paged continuation failure",
+                    };
+                }
                 if (transientEmailFailuresRemaining > 0)
                 {
                     --transientEmailFailuresRemaining;
@@ -106,6 +117,10 @@ namespace
                     };
                 }
             }
+            const bool pagedNotificationDelta =
+                emailDelta && nextEmailDeltaCreatesPagedNotification;
+            if (pagedNotificationDelta)
+                nextEmailDeltaCreatesPagedNotification = false;
             const bool recoverableEmailGap = emailDelta && recoverableEmailGapsRemaining > 0;
             if (recoverableEmailGap)
                 --recoverableEmailGapsRemaining;
@@ -125,9 +140,13 @@ namespace
                 }
             }
 
-            const bool createsNotification =
-                emailDelta && !recoverableEmailGap && successfulEmailDeltas == 1;
-            const std::string emailState = createsNotification ? "email-state-2" : m_emailState;
+            const bool createsNotification = emailDelta && !recoverableEmailGap &&
+                                             (pagedNotificationDelta || successfulEmailDeltas == 1);
+            const std::string createdEmailId =
+                pagedNotificationDelta ? "email-page-one" : "email-new";
+            const std::string emailState = pagedNotificationDelta ? "email-state-page-one"
+                                           : createsNotification  ? "email-state-2"
+                                                                  : m_emailState;
             javelin::jmap::api::ResponseEnvelope response;
             response.sessionState = "session-state";
             for (const auto& invocation : request.envelope.methodCalls)
@@ -153,11 +172,12 @@ namespace
                     }
                     else
                     {
-                        arguments = std::string{R"({"accountId":"account-1","oldState":")"} +
-                                    m_emailState + R"(","newState":")" + emailState +
-                                    R"(","hasMoreChanges":false,"created":[)" +
-                                    (createsNotification ? R"("email-new")" : "") +
-                                    R"(],"updated":[],"destroyed":[]})";
+                        arguments =
+                            std::string{R"({"accountId":"account-1","oldState":")"} + m_emailState +
+                            R"(","newState":")" + emailState + R"(","hasMoreChanges":)" +
+                            (pagedNotificationDelta ? "true" : "false") + R"(,"created":[)" +
+                            (createsNotification ? "\"" + createdEmailId + "\"" : "") +
+                            R"(],"updated":[],"destroyed":[]})";
                     }
                 }
                 else if (name == "Email/get")
@@ -175,7 +195,8 @@ namespace
                                                   invocation.callId == "updated-emails-get");
                     const std::string objects =
                         createsNotification && createdFetch
-                            ? R"({"id":"email-new","blobId":"blob-new","threadId":"thread-new","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:00Z","subject":"New mail","preview":"Preview"})"
+                            ? std::string{R"({"id":")"} + createdEmailId +
+                                  R"(","blobId":"blob-new","threadId":"thread-new","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:00Z","subject":"New mail","preview":"Preview"})"
                         : unknownPresentationFetch
                             ? R"({"id":"email-gap-new","blobId":"blob-gap-new","threadId":"thread-gap-new","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:01Z","subject":"Recovered mail","preview":"Preview"})"
                             : "";
@@ -222,6 +243,8 @@ namespace
             {
                 ++successfulEmailDeltas;
                 m_emailState = emailState;
+                if (pagedNotificationDelta)
+                    failPagedEmailContinuation = true;
             }
             co_return response;
         }
@@ -403,6 +426,75 @@ TEST_CASE("full coordinator demands reconcile Email before refreshing all mailbo
     REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState).has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
           "email-state-2");
+}
+
+TEST_CASE("committed Email delta page publishes before a failed continuation",
+          "[app][account][sync][publication][notification][retry]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    javelin::app::MailNotificationService notifications{fixture.connection};
+    QObject::connect(&fixture.coordinator,
+                     &javelin::app::AccountSyncCoordinator::notificationEventsCommitted,
+                     &notifications, &javelin::app::MailNotificationService::accountChanged);
+    int deliveries = 0;
+    QObject::connect(
+        &notifications, &javelin::app::MailNotificationService::notificationRaised,
+        [&notifications, &deliveries](const QString& accountId, const QString&, const QString&,
+                                      const QString&, const QString&, const QString&,
+                                      const QString&, const QStringList& deliveredEmailIds)
+        {
+            ++deliveries;
+            REQUIRE_FALSE(notifications.markDelivered(accountId.toStdString(), deliveredEmailIds)
+                              .has_value());
+        });
+
+    int emailPublications = 0;
+    QObject::connect(&fixture.coordinator, &javelin::app::AccountSyncCoordinator::cacheCommitted,
+                     [&emailPublications](const javelin::app::MailCacheChange& change)
+                     {
+                         if (change.emailObjectsChanged)
+                             ++emailPublications;
+                     });
+
+    const auto attemptsBefore = fixture.transport.emailDeltaAttempts;
+    fixture.transport.nextEmailDeltaCreatesPagedNotification = true;
+    REQUIRE(fixture.coordinator.requestSynchronization());
+    REQUIRE(waitUntil(
+        [&fixture, attemptsBefore, &deliveries, &emailPublications]
+        {
+            return fixture.transport.emailDeltaAttempts >= attemptsBefore + 2 && deliveries == 1 &&
+                   emailPublications >= 1;
+        }));
+
+    javelin::jmap::cache::SyncStateRepository states{fixture.connection};
+    const auto committedState =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(
+        committedState));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(committedState).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(committedState)
+              ->stateToken == "email-state-page-one");
+
+    REQUIRE(waitUntil([&fixture, attemptsBefore]
+                      { return fixture.transport.emailDeltaAttempts >= attemptsBefore + 3; }));
+    CHECK(deliveries == 1);
+
+    javelin::jmap::cache::NotificationRepository repository{fixture.connection};
+    const auto pending = repository.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending).empty());
 }
 
 TEST_CASE("reconnect and transient retry keep the authoritative Email reconciliation demand",
