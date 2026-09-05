@@ -84,10 +84,15 @@ namespace javelin::app
           m_endpointRetryGate(endpointRetryGate),
           m_authenticationRefreshHandler(std::move(authenticationRefreshHandler))
     {
+        m_refreshClock.start();
         m_refreshDebounceTimer.setSingleShot(true);
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
         QObject::connect(&m_refreshDebounceTimer, &QTimer::timeout, this,
                          &AccountSyncCoordinator::scheduleCatchUpRefresh);
+        m_groupwareRetryTimer.setSingleShot(true);
+        m_groupwareRetryTimer.setInterval(refreshDebounceInterval);
+        QObject::connect(&m_groupwareRetryTimer, &QTimer::timeout, this,
+                         &AccountSyncCoordinator::processGroupwareStateChanges);
         m_notificationBaselineRetryTimer.setSingleShot(true);
         QObject::connect(&m_notificationBaselineRetryTimer, &QTimer::timeout, this,
                          &AccountSyncCoordinator::scheduleNotificationBaselineRefresh);
@@ -233,7 +238,10 @@ namespace javelin::app
         m_pendingIdentityStateChanges.clear();
         m_authenticationRecoveryInFlight = false;
         m_refreshDebounceTimer.stop();
+        m_groupwareRetryTimer.stop();
         m_notificationBaselineRetryTimer.stop();
+        m_pendingRefreshDeadlineMs.reset();
+        m_endpointEligibleAtMs.reset();
         m_queuedRefreshDemand = {};
         m_debouncedRefreshDemand = {};
         setStatus(Status::Disconnected);
@@ -260,6 +268,7 @@ namespace javelin::app
         if (m_runContext == nullptr)
             return false;
         m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
+        m_endpointEligibleAtMs.reset();
         scheduleDebouncedRefresh(true);
         return true;
     }
@@ -273,6 +282,7 @@ namespace javelin::app
         if (m_runContext == nullptr)
             return false;
         m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
+        m_endpointEligibleAtMs.reset();
         scheduleDebouncedRefresh(false, {std::string{mailboxId}});
         return true;
     }
@@ -296,9 +306,11 @@ namespace javelin::app
         merge(m_pendingCalendarStateChanges, std::move(routed.calendarStates));
         merge(m_pendingContactStateChanges, std::move(routed.contactStates));
         merge(m_pendingIdentityStateChanges, std::move(routed.identityStates));
-        if (!m_pendingStateChanges.empty() || !m_pendingCalendarStateChanges.empty() ||
-            !m_pendingContactStateChanges.empty() || !m_pendingIdentityStateChanges.empty())
+        if (!m_pendingStateChanges.empty())
             scheduleDebouncedRefresh();
+        if (!m_pendingCalendarStateChanges.empty() || !m_pendingContactStateChanges.empty() ||
+            !m_pendingIdentityStateChanges.empty())
+            scheduleGroupwareStateProcessing();
         co_return;
     }
 
@@ -499,9 +511,7 @@ namespace javelin::app
                 auto queuedLease = m_endpointRetryGate.acquire(m_runContext->configuration.apiUrl);
                 if (!queuedLease.allowed())
                 {
-                    m_debouncedRefreshDemand.merge(queued);
-                    m_refreshDebounceTimer.start(static_cast<int>(
-                        std::max<std::int64_t>(1, queuedLease.retryAfter().count())));
+                    scheduleEndpointRetry(std::move(queued), queuedLease.retryAfter());
                 }
                 else
                 {
@@ -930,9 +940,7 @@ namespace javelin::app
                                                           std::vector<std::string> mailboxIds)
     {
         if (!hasValidSettings() || m_runContext == nullptr)
-        {
             return;
-        }
 
         if (forceEmailRefresh)
             m_debouncedRefreshDemand.merge(MailRefreshDemand::full());
@@ -941,7 +949,41 @@ namespace javelin::app
                                                              .emailState = false,
                                                              .allMailboxes = false,
                                                              .mailboxIds = std::move(mailboxIds)});
-        m_refreshDebounceTimer.start(static_cast<int>(refreshDebounceInterval.count()));
+
+        if (!m_pendingRefreshDeadlineMs.has_value())
+            m_pendingRefreshDeadlineMs = m_refreshClock.elapsed() + refreshDebounceInterval.count();
+        armRefreshTimer();
+    }
+
+    void AccountSyncCoordinator::armRefreshTimer()
+    {
+        if (!m_pendingRefreshDeadlineMs.has_value())
+        {
+            m_refreshDebounceTimer.stop();
+            return;
+        }
+
+        qint64 deadline = *m_pendingRefreshDeadlineMs;
+        if (m_endpointEligibleAtMs.has_value())
+            deadline = std::max(deadline, *m_endpointEligibleAtMs);
+        const auto remaining = std::max<qint64>(0, deadline - m_refreshClock.elapsed());
+        m_refreshDebounceTimer.start(static_cast<int>(remaining));
+    }
+
+    void AccountSyncCoordinator::scheduleEndpointRetry(MailRefreshDemand demand,
+                                                       const std::chrono::milliseconds retryAfter)
+    {
+        m_debouncedRefreshDemand.merge(demand);
+        const auto now = m_refreshClock.elapsed();
+        m_pendingRefreshDeadlineMs = now;
+        m_endpointEligibleAtMs = now + std::max<std::int64_t>(1, retryAfter.count());
+        armRefreshTimer();
+    }
+
+    void AccountSyncCoordinator::scheduleGroupwareStateProcessing()
+    {
+        if (!m_groupwareRetryTimer.isActive())
+            m_groupwareRetryTimer.start(static_cast<int>(refreshDebounceInterval.count()));
     }
 
     void AccountSyncCoordinator::scheduleNotificationBaselineRetry()
@@ -973,12 +1015,16 @@ namespace javelin::app
             return;
         }
         m_debouncedRefreshDemand.merge(demand);
-        m_refreshDebounceTimer.start(0);
+        const auto now = m_refreshClock.elapsed();
+        if (!m_pendingRefreshDeadlineMs.has_value() || *m_pendingRefreshDeadlineMs > now)
+            m_pendingRefreshDeadlineMs = now;
+        armRefreshTimer();
     }
 
     void AccountSyncCoordinator::scheduleCatchUpRefresh()
     {
-        processGroupwareStateChanges();
+        m_pendingRefreshDeadlineMs.reset();
+        m_endpointEligibleAtMs.reset();
         auto demand = std::exchange(m_debouncedRefreshDemand, {});
         if (m_pendingStateChanges.empty() && demand.empty())
             return;
@@ -1016,9 +1062,7 @@ namespace javelin::app
         auto retryLease = m_endpointRetryGate.acquire(m_runContext->configuration.apiUrl);
         if (!retryLease.allowed())
         {
-            m_debouncedRefreshDemand.merge(demand);
-            m_refreshDebounceTimer.start(
-                static_cast<int>(std::max<std::int64_t>(1, retryLease.retryAfter().count())));
+            scheduleEndpointRetry(std::move(demand), retryLease.retryAfter());
             return;
         }
 
@@ -1082,7 +1126,7 @@ namespace javelin::app
                 { Q_EMIT identityStateChanged(ownerAccountId, states); });
         if (!m_pendingCalendarStateChanges.empty() || !m_pendingContactStateChanges.empty() ||
             !m_pendingIdentityStateChanges.empty())
-            m_refreshDebounceTimer.start(static_cast<int>(refreshDebounceInterval.count()));
+            scheduleGroupwareStateProcessing();
     }
 
     bool

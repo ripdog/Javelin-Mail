@@ -497,6 +497,40 @@ TEST_CASE("committed Email delta page publishes before a failed continuation",
         std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending).empty());
 }
 
+TEST_CASE("continuous mail pushes cannot postpone the first debounce deadline",
+          "[app][account][sync][debounce]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    const auto attemptsBefore = fixture.transport.emailDeltaAttempts;
+    QElapsedTimer burst;
+    burst.start();
+    for (int index = 0; index < 10; ++index)
+    {
+        QCoro::waitFor(fixture.coordinator.onStateChange({
+            .newState = "push-burst-" + std::to_string(index),
+            .changedTypes = {"Email"},
+            .changedStates = {{"account-1", {{"Email", "email-burst-state"}}}},
+        }));
+
+        QElapsedTimer spacing;
+        spacing.start();
+        while (spacing.elapsed() < 100)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+
+    CHECK(burst.elapsed() < 1300);
+    CHECK(fixture.transport.emailDeltaAttempts > attemptsBefore);
+}
+
 TEST_CASE("reconnect and transient retry keep the authoritative Email reconciliation demand",
           "[app][account][sync][ownership][retry]")
 {

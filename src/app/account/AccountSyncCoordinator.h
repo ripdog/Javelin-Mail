@@ -14,10 +14,12 @@
 
 #include <QCoroTask>
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
 
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -172,6 +174,9 @@ namespace javelin::app
         void handleResumeWatchdogTimeout();
         void scheduleDebouncedRefresh(bool forceEmailRefresh = false,
                                       std::vector<std::string> mailboxIds = {});
+        void armRefreshTimer();
+        void scheduleEndpointRetry(MailRefreshDemand demand, std::chrono::milliseconds retryAfter);
+        void scheduleGroupwareStateProcessing();
         void scheduleNotificationBaselineRetry();
         void scheduleNotificationBaselineRefresh();
         void scheduleCatchUpRefresh();
@@ -228,7 +233,11 @@ namespace javelin::app
         std::optional<std::size_t> m_refreshGenerationInFlight;
         MailRefreshDemand m_queuedRefreshDemand;
         MailRefreshDemand m_debouncedRefreshDemand;
+        QElapsedTimer m_refreshClock;
+        std::optional<qint64> m_pendingRefreshDeadlineMs;
+        std::optional<qint64> m_endpointEligibleAtMs;
         QTimer m_refreshDebounceTimer;
+        QTimer m_groupwareRetryTimer;
         QTimer m_notificationBaselineRetryTimer;
         QTimer m_resumeWatchdogTimer;
         std::optional<std::vector<std::string>> m_pendingNotificationBaselineMailboxIds;
