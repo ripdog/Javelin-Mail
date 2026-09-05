@@ -12,6 +12,7 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MutationJournal.h"
 
@@ -197,6 +198,7 @@ namespace javelin::app
         javelin::jmap::api::MethodCaller caller{m_methodTransport};
         javelin::jmap::cache::ThreadRepository threads{m_databaseConnection};
         javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{m_databaseConnection};
         ThreadMaterializationSummary summary;
         summary.threadIds.reserve(target.threadIds.size());
 
@@ -404,6 +406,13 @@ namespace javelin::app
                     missing.pop_back();
                 }
 
+                const auto revisionResult = cacheRevisions.capture(target.accountId);
+                if (const auto* databaseError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+                    co_return javelin::jmap::operationError(*databaseError);
+                const auto revisionFence =
+                    std::get<javelin::jmap::sync::MailCacheRevisionFence>(revisionResult);
+
                 const auto called = co_await caller.call(requestContext, builder);
                 const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&called);
                 if (envelope == nullptr)
@@ -430,6 +439,13 @@ namespace javelin::app
                     co_return javelin::jmap::operationError(*databaseError);
                 auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
                     std::move(transactionResult));
+                const auto revisionAdvanced =
+                    cacheRevisions.advanceIfCurrent(transaction.cacheTransaction(), revisionFence);
+                if (const auto* databaseError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+                    co_return javelin::jmap::operationError(*databaseError);
+                if (!std::get<bool>(revisionAdvanced))
+                    continue;
                 if (const auto databaseError = emails.upsertMany(transaction.cacheTransaction(),
                                                                  target.accountId, response.list))
                     co_return javelin::jmap::operationError(*databaseError);

@@ -3,6 +3,7 @@
 #include "app/WorkScheduler.h"
 #include "app/account/EndpointRetryGate.h"
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/MethodCaller.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
@@ -10,6 +11,7 @@
 #include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/MailboxRefreshExecutor.h"
 
 #include <QCoroTask>
 
@@ -256,6 +258,63 @@ namespace
         bool m_unknownEmailPending = false;
     };
 
+    class CoordinatorQueryRefreshPort final : public javelin::app::MailQueryRefreshPort
+    {
+      public:
+        CoordinatorQueryRefreshPort(javelin::jmap::cache::DatabaseConnection& connection,
+                                    CoordinatorTransport& transport)
+            : m_connection(connection), m_transport(transport)
+        {
+        }
+
+        [[nodiscard]] QCoro::Task<javelin::app::CanonicalMailboxRefreshResult>
+        refreshCanonicalMailbox(std::string accountId, std::string mailboxId) override
+        {
+            javelin::jmap::api::MethodCaller caller{m_transport};
+            const javelin::jmap::api::ApiRequestContext context{
+                .credentials =
+                    {
+                        .accountId = accountId,
+                        .emailAddress = "alice@example.com",
+                        .sessionUrl = "http://127.0.0.1:9/session",
+                        .token = {.accessToken = "token",
+                                  .refreshToken = std::nullopt,
+                                  .expiry = std::nullopt},
+                    },
+                .apiUrl = "https://mail.example.test/api",
+                .requestLimits =
+                    javelin::jmap::api::CoreRequestLimits{
+                        .maxSizeRequest = 1000000,
+                        .maxConcurrentRequests = 4,
+                        .maxCallsInRequest = 16,
+                        .maxObjectsInGet = 500,
+                        .maxObjectsInSet = 500,
+                    },
+            };
+            javelin::jmap::sync::MailboxRefreshExecutor executor{m_connection, caller, context};
+            const auto result = co_await executor.refreshCollapsedMailbox(accountId, mailboxId, {},
+                                                                          false, accountId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                co_return *error;
+            const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
+            if (summary.superseded)
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::Conflict,
+                    .message = QStringLiteral("The test mailbox refresh was superseded."),
+                };
+            }
+            co_return javelin::app::CanonicalMailboxRefreshSummary{
+                .cacheChanged =
+                    summary.canonicalWindowMaterialized || !summary.changedEmailIds.empty(),
+            };
+        }
+
+      private:
+        javelin::jmap::cache::DatabaseConnection& m_connection;
+        CoordinatorTransport& m_transport;
+    };
+
     struct CoordinatorFixture
     {
         QTemporaryDir temporaryDirectory;
@@ -266,17 +325,19 @@ namespace
         javelin::jmap::cache::AccountRepository accounts;
         javelin::jmap::cache::MailboxReadRepository mailboxes;
         javelin::app::WorkScheduler workScheduler;
+        CoordinatorQueryRefreshPort queryRefreshPort;
         javelin::app::EndpointRetryGate retryGate;
         javelin::app::AccountSyncCoordinator coordinator;
 
         CoordinatorFixture()
             : connection(openDatabase()), accounts(connection), mailboxes(connection),
               workScheduler(connection, nullptr, std::chrono::milliseconds{0}),
+              queryRefreshPort(connection, transport),
               retryGate({.initialDelay = std::chrono::milliseconds{1},
                          .maxDelay = std::chrono::milliseconds{1},
                          .probePollInterval = std::chrono::milliseconds{1}}),
               coordinator(connection, transport, networkAccessManager, cooldowns, accounts,
-                          mailboxes, workScheduler, retryGate)
+                          mailboxes, workScheduler, queryRefreshPort, retryGate)
         {
             transport.connection = &connection;
             seed();

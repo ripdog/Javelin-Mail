@@ -34,6 +34,7 @@
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/EmailMutationQueue.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "jmap/sync/MailboxMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
@@ -3656,6 +3657,14 @@ namespace javelin::jmap
             };
         }
 
+        javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{
+            *m_impl->databaseConnection};
+        const auto revisionResult = cacheRevisions.capture(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto revisionFence =
+            std::get<javelin::jmap::sync::MailCacheRevisionFence>(revisionResult);
+
         const auto pageResult = co_await m_impl->queryClient->queryCollapsedPage(
             settings, accountId, javelin::jmap::search::toEmailQueryFilter(criteria, resolution),
             offset, limit, std::move(sort), std::move(anchor), 1, reportProgress);
@@ -3673,6 +3682,12 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
             std::move(transactionResult));
+        const auto revisionAdvanced =
+            cacheRevisions.advanceIfCurrent(transaction.cacheTransaction(), revisionFence);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+            co_return javelin::jmap::operationError(*error);
+        if (!std::get<bool>(revisionAdvanced))
+            co_return MailQueryMaterializationSuperseded{};
         javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
         if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(), accountId,
                                                           page.representatives))
@@ -3695,17 +3710,15 @@ namespace javelin::jmap
                                                     .emailIds = emailIds,
                                                 }))
             co_return javelin::jmap::operationError(*error);
-        if (const auto error = transaction.commit())
-            co_return javelin::jmap::operationError(*error);
 
         javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{
             *m_impl->databaseConnection};
         const auto cachedResults = messageSummaries.listMessagesByEmailIds(accountId, emailIds);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
-        {
             co_return javelin::jmap::operationError(*error);
-        }
         auto results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);
+        if (const auto error = transaction.commit())
+            co_return javelin::jmap::operationError(*error);
 
         co_return MessageSearchSummary{
             .accountId = std::move(accountId),
@@ -3747,6 +3760,13 @@ namespace javelin::jmap
         }
 
         const bool anchoredRequest = anchor.has_value();
+        javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{
+            *m_impl->databaseConnection};
+        const auto revisionResult = cacheRevisions.capture(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto revisionFence =
+            std::get<javelin::jmap::sync::MailCacheRevisionFence>(revisionResult);
         const auto pageResult = co_await m_impl->queryClient->queryCollapsedPage(
             settings, accountId,
             javelin::jmap::api::EmailQueryFilter{
@@ -3776,6 +3796,12 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
             std::move(transactionResult));
+        const auto revisionAdvanced =
+            cacheRevisions.advanceIfCurrent(transaction.cacheTransaction(), revisionFence);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+            co_return javelin::jmap::operationError(*error);
+        if (!std::get<bool>(revisionAdvanced))
+            co_return MailQueryMaterializationSuperseded{};
         javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
         if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(), accountId,
                                                           page.representatives))
@@ -3799,8 +3825,6 @@ namespace javelin::jmap
                                                     .emailIds = std::move(representativeIds),
                                                 }))
             co_return javelin::jmap::operationError(*error);
-        if (const auto error = transaction.commit())
-            co_return javelin::jmap::operationError(*error);
 
         javelin::jmap::cache::MessageSummaryReadRepository messageSummaries{
             *m_impl->databaseConnection};
@@ -3809,6 +3833,8 @@ namespace javelin::jmap
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
             co_return javelin::jmap::operationError(*error);
         auto results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);
+        if (const auto error = transaction.commit())
+            co_return javelin::jmap::operationError(*error);
         co_return MailboxPageSummary{
             .accountId = std::move(accountId),
             .mailboxId = std::move(mailboxId),

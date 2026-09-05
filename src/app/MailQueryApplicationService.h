@@ -1,25 +1,36 @@
 #pragma once
 
 #include "app/MailApplicationPorts.h"
+#include "app/MailQueryRefreshPort.h"
 #include "app/MessageListMaterializationPort.h"
 #include "jmap/sync/MailboxInterestRegistry.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
+#include <QFuture>
 #include <QObject>
 #include <QPointer>
+#include <QPromise>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <variant>
 
 namespace javelin::jmap
 {
     class MailQueryMaterializer;
 }
 
+namespace javelin::jmap::api
+{
+    class JmapMethodTransport;
+}
+
 namespace javelin::jmap::cache
 {
+    class AccountRepository;
     class ContactReader;
     class MailTagReader;
     class MailboxFilterReader;
@@ -63,7 +74,8 @@ namespace javelin::app
 
     class MailQueryApplicationService final : public QObject,
                                               public MessageListMaterializationPort,
-                                              public MailCacheChangePublisher
+                                              public MailCacheChangePublisher,
+                                              public MailQueryRefreshPort
     {
         Q_OBJECT
 
@@ -71,6 +83,8 @@ namespace javelin::app
         MailQueryApplicationService(
             javelin::jmap::cache::DatabaseConnection& databaseConnection,
             javelin::jmap::MailQueryMaterializer& queryMaterializer,
+            javelin::jmap::api::JmapMethodTransport& methodTransport,
+            javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::ContactReader& contactReader,
             javelin::jmap::cache::MailTagReader& mailTagReader,
             javelin::jmap::cache::MailboxStatisticsReader& mailboxStatisticsReader,
@@ -89,6 +103,8 @@ namespace javelin::app
         requestMailboxWindow(MailboxWindowIntent intent) override;
         [[nodiscard]] QCoro::Task<SearchWindowResult>
         requestSearchWindow(SearchWindowIntent intent) override;
+        [[nodiscard]] QCoro::Task<CanonicalMailboxRefreshResult>
+        refreshCanonicalMailbox(std::string accountId, std::string mailboxId) override;
         void ensureThread(ThreadMaterializationIntent intent) override;
         void retireSearchWindow(std::string accountId, std::string windowKey) override;
         void publishCacheChange(MailCacheChange change) override;
@@ -109,8 +125,30 @@ namespace javelin::app
         [[nodiscard]] bool searchWindowRetired(const std::string& leaseKey) const;
         void publishObservedMailboxIds(const std::string& accountId);
 
+        struct QueryAdmissionSuperseded
+        {
+        };
+        using AdmittedMailboxResult = std::variant<MailboxWindowSummary, QueryAdmissionSuperseded,
+                                                   javelin::jmap::OperationError>;
+        using AdmittedSearchResult = std::variant<SearchWindowSummary, QueryAdmissionSuperseded,
+                                                  javelin::jmap::OperationError>;
+        [[nodiscard]] QCoro::Task<MailboxWindowResult>
+        requestMailboxWindowAdmitted(MailboxWindowIntent intent, std::uint64_t requiredSerial);
+        [[nodiscard]] QCoro::Task<AdmittedMailboxResult>
+        executeMailboxWindowNetwork(MailboxWindowIntent intent);
+        [[nodiscard]] QCoro::Task<SearchWindowResult>
+        requestSearchWindowAdmitted(SearchWindowIntent intent, std::string leaseKey);
+        [[nodiscard]] QCoro::Task<AdmittedSearchResult>
+        executeSearchWindowNetwork(SearchWindowIntent intent, std::string leaseKey);
+        void completeMailboxAdmission(const std::string& key, std::uint64_t generation,
+                                      MailboxWindowResult result);
+        void completeSearchAdmission(const std::string& key, std::uint64_t generation,
+                                     SearchWindowResult result);
+
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::MailQueryMaterializer& m_queryMaterializer;
+        javelin::jmap::api::JmapMethodTransport& m_methodTransport;
+        javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::ContactReader& m_contactReader;
         javelin::jmap::cache::MailTagReader& m_mailTagReader;
         javelin::jmap::cache::MailboxStatisticsReader& m_mailboxStatisticsReader;
@@ -126,7 +164,24 @@ namespace javelin::app
             std::size_t activeRequests = 0;
             bool retired = false;
         };
+        struct MailboxAdmissionState
+        {
+            std::uint64_t generation = 0;
+            std::uint64_t dispatchSerial = 0;
+            QFuture<MailboxWindowResult> future;
+            std::shared_ptr<QPromise<MailboxWindowResult>> promise;
+        };
+        struct SearchAdmissionState
+        {
+            std::uint64_t generation = 0;
+            QFuture<SearchWindowResult> future;
+            std::shared_ptr<QPromise<SearchWindowResult>> promise;
+        };
         std::unordered_map<std::string, SearchWindowRequestState> m_searchWindowRequests;
+        std::unordered_map<std::string, MailboxAdmissionState> m_mailboxAdmissions;
+        std::unordered_map<std::string, SearchAdmissionState> m_searchAdmissions;
+        std::uint64_t m_admissionGeneration = 0;
+        std::uint64_t m_mailboxRefreshSerial = 0;
         javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
     };
 

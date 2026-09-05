@@ -1,4 +1,8 @@
+#include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "storage/migrations/MigrationRunner.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -152,6 +156,99 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
     CHECK(connection.schemaVersion() == runner.latestVersion());
 }
 
+TEST_CASE("mail cache revision tracks Email and query-window writes only",
+          "[jmap][cache][database][mail-cache-revision]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    QSqlQuery seed{connection.database()};
+    REQUIRE(seed.exec(
+        QStringLiteral("INSERT INTO accounts(account_id,email_address,session_url,is_primary) "
+                       "VALUES('account-1','user@example.test','https://example.test/jmap',1)")));
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO mailboxes(account_id,mailbox_id,name,total_emails,total_threads) "
+        "VALUES('account-1','inbox','Inbox',1,1)")));
+
+    javelin::jmap::sync::MailCacheRevisionRepository revisions{connection};
+    const auto initial = revisions.capture("account-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailCacheRevisionFence>(initial));
+    CHECK(std::get<javelin::jmap::sync::MailCacheRevisionFence>(initial).revision == 0);
+
+    javelin::jmap::domain::Email email;
+    email.id = "email-1";
+    email.threadId = "thread-1";
+    email.mailboxIds = {"inbox"};
+    email.receivedAt = "2026-09-05T00:00:00Z";
+    email.subject = "Revision test";
+    email.preview = "Preview";
+    javelin::jmap::cache::EmailRepository emails{connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+    const auto afterEmail = revisions.capture("account-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailCacheRevisionFence>(afterEmail));
+    const auto emailRevision =
+        std::get<javelin::jmap::sync::MailCacheRevisionFence>(afterEmail).revision;
+    CHECK(emailRevision > 0);
+
+    javelin::jmap::cache::MailboxWindowRepository mailboxWindows{connection};
+    REQUIRE_FALSE(mailboxWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "inbox",
+                          .queryKey = "mailbox-query",
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "query-state-1",
+                          .emailIds = {"email-1"},
+                      })
+                      .has_value());
+    const auto afterMailboxWindow = revisions.capture("account-1");
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::sync::MailCacheRevisionFence>(afterMailboxWindow));
+    const auto mailboxRevision =
+        std::get<javelin::jmap::sync::MailCacheRevisionFence>(afterMailboxWindow).revision;
+    CHECK(mailboxRevision > emailRevision);
+
+    javelin::jmap::cache::SearchWindowRepository searchWindows{connection};
+    REQUIRE_FALSE(searchWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = "search-query",
+                          .offset = 0,
+                          .limit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "search-state-1",
+                          .emailIds = {"email-1"},
+                      })
+                      .has_value());
+    const auto afterSearchWindow = revisions.capture("account-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailCacheRevisionFence>(afterSearchWindow));
+    const auto searchRevision =
+        std::get<javelin::jmap::sync::MailCacheRevisionFence>(afterSearchWindow).revision;
+    CHECK(searchRevision > mailboxRevision);
+
+    REQUIRE(seed.exec(
+        QStringLiteral("UPDATE accounts SET name='Renamed' WHERE account_id='account-1'")));
+    const auto afterAccountOnly = revisions.capture("account-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailCacheRevisionFence>(afterAccountOnly));
+    CHECK(std::get<javelin::jmap::sync::MailCacheRevisionFence>(afterAccountOnly).revision ==
+          searchRevision);
+}
+
 TEST_CASE("participant identity state migration preserves calendar tokens and widens the domain",
           "[jmap][cache][database][calendar]")
 {
@@ -198,7 +295,7 @@ TEST_CASE("participant identity state migration preserves calendar tokens and wi
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery preserved{migrated.database()};
     REQUIRE(preserved.exec(QStringLiteral(
@@ -270,7 +367,7 @@ TEST_CASE("pending calendar invitation migration isolates snapshots from event c
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery pending{migrated.database()};
     REQUIRE(pending.exec(
@@ -405,7 +502,7 @@ TEST_CASE("calendar window event state migration leaves legacy materialization u
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery columns{migrated.database()};
     REQUIRE(columns.exec(QStringLiteral("PRAGMA table_info(calendar_query_windows)")));
@@ -469,7 +566,7 @@ TEST_CASE("durable calendar alert push migration cascades queued alerts with the
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery queue{migrated.database()};
     REQUIRE(queue.exec(QStringLiteral(
@@ -556,7 +653,7 @@ TEST_CASE("calendar reminder horizon migration cascades retention with its owner
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery migratedTiming{migrated.database()};
     REQUIRE(migratedTiming.exec(QStringLiteral(
@@ -630,7 +727,7 @@ TEST_CASE("legacy mail notification state is discarded without touching cached m
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery email{migrated.database()};
     REQUIRE(email.exec(QStringLiteral(
@@ -705,7 +802,7 @@ TEST_CASE(
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery active{migrated.database()};
     REQUIRE(active.exec(QStringLiteral(
@@ -799,7 +896,7 @@ TEST_CASE("mutation journal retention migrates and follows durable owners",
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&migratedResult))
         FAIL(error->message.toStdString());
     auto migrated = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(migratedResult));
-    CHECK(migrated.schemaVersion() == 73);
+    CHECK(migrated.schemaVersion() == 74);
 
     QSqlQuery retained{migrated.database()};
     REQUIRE(retained.exec(

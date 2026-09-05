@@ -261,10 +261,12 @@ namespace javelin::app
             *m_methodTransport, *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns,
             *m_accountRepository, *m_mailboxRepository, *m_errorCoordinator, *m_workScheduler);
         m_mailQueryApplicationService = std::make_unique<MailQueryApplicationService>(
-            m_databaseConnection, *m_mailQueryMaterializer, *m_contactRepository,
-            *m_mailTagRepository, *m_mailboxStatisticsRepository, *m_mailboxMessageRepository,
-            *m_mailboxFilterRepository, *m_accountRuntimeManager, *m_errorCoordinator,
-            *m_workScheduler, *m_mailboxMaintenanceRegistry);
+            m_databaseConnection, *m_mailQueryMaterializer, *m_methodTransport,
+            *m_accountRepository, *m_contactRepository, *m_mailTagRepository,
+            *m_mailboxStatisticsRepository, *m_mailboxMessageRepository, *m_mailboxFilterRepository,
+            *m_accountRuntimeManager, *m_errorCoordinator, *m_workScheduler,
+            *m_mailboxMaintenanceRegistry);
+        m_accountRuntimeManager->setMailQueryRefreshPort(*m_mailQueryApplicationService);
         m_mailMutationApplicationService = std::make_unique<MailMutationApplicationService>(
             m_databaseConnection, *m_emailMutationEngine, *m_mailboxMutationEngine,
             *m_mailQueryClient, *m_mailboxRepository, *m_mailTagRepository,

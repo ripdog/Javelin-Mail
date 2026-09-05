@@ -23,7 +23,9 @@
 #include "jmap/MessageContentClient.h"
 #include "jmap/OperationError.h"
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/api/MethodCaller.h"
 #include "jmap/api/SessionRefreshClient.h"
+#include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/CalendarRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/EmailRepository.h"
@@ -51,12 +53,15 @@
 #include "jmap/sieve/SieveProtocolClient.h"
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "jmap/sync/MailboxMutationEngine.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MutationJournal.h"
 
 #include <QCoroFuture>
 #include <QCoroTask>
+#include <QCoroTimer>
 
 #include <KLocalizedString>
 
@@ -417,6 +422,65 @@ namespace javelin::app
             return key;
         }
 
+        void appendAdmissionPart(std::string& key, const std::string_view value)
+        {
+            key.append(std::to_string(value.size()));
+            key.push_back(':');
+            key.append(value);
+            key.push_back('|');
+        }
+
+        [[nodiscard]] std::string mailboxAdmissionKey(const MailboxWindowIntent& intent,
+                                                      const std::string_view queryKey)
+        {
+            std::string key;
+            appendAdmissionPart(key, intent.accountId);
+            appendAdmissionPart(key, queryKey);
+            appendAdmissionPart(key, std::to_string(intent.offset));
+            appendAdmissionPart(key, std::to_string(intent.limit));
+            appendAdmissionPart(key, intent.anchor.has_value() ? "1" : "0");
+            if (intent.anchor.has_value())
+                appendAdmissionPart(key, *intent.anchor);
+            appendAdmissionPart(key, std::to_string(intent.anchorOffset));
+            return key;
+        }
+
+        [[nodiscard]] std::string searchAdmissionKey(const SearchWindowIntent& intent,
+                                                     const std::string_view queryKey)
+        {
+            std::string key;
+            appendAdmissionPart(key, intent.accountId);
+            appendAdmissionPart(key, queryKey);
+            appendAdmissionPart(key, std::to_string(intent.offset));
+            appendAdmissionPart(key, std::to_string(intent.limit));
+            appendAdmissionPart(key, intent.anchor.has_value() ? "1" : "0");
+            if (intent.anchor.has_value())
+                appendAdmissionPart(key, *intent.anchor);
+            appendAdmissionPart(key, "1");
+            return key;
+        }
+
+        [[nodiscard]] bool isCanonicalMailboxIntent(const MailboxWindowIntent& intent,
+                                                    const std::string_view queryKey)
+        {
+            if (intent.offset != 0 || intent.limit != 100 || intent.anchor.has_value())
+                return false;
+            return queryKey == javelin::jmap::sync::mailboxQueryKey({
+                                   .mailboxId = intent.mailboxId,
+                                   .sortProperty = "receivedAt",
+                                   .isAscending = false,
+                                   .collapseThreads = true,
+                               });
+        }
+
+        [[nodiscard]] QCoro::Task<void> yieldMailQueryRetry()
+        {
+            QTimer timer;
+            timer.setSingleShot(true);
+            timer.start(0);
+            co_await qCoro(timer).waitForTimeout();
+        }
+
         template <typename Result>
         [[nodiscard]] Result observeResult(ApplicationErrorCoordinator& coordinator,
                                            const AccountConnectionSettings& settings,
@@ -559,6 +623,8 @@ namespace javelin::app
     MailQueryApplicationService::MailQueryApplicationService(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
         javelin::jmap::MailQueryMaterializer& queryMaterializer,
+        javelin::jmap::api::JmapMethodTransport& methodTransport,
+        javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::ContactReader& contactReader,
         javelin::jmap::cache::MailTagReader& mailTagReader,
         javelin::jmap::cache::MailboxStatisticsReader& mailboxStatisticsReader,
@@ -568,7 +634,8 @@ namespace javelin::app
         WorkScheduler& workScheduler, MailboxMaintenanceRegistry& mailboxMaintenanceRegistry,
         QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
-          m_queryMaterializer(queryMaterializer), m_contactReader(contactReader),
+          m_queryMaterializer(queryMaterializer), m_methodTransport(methodTransport),
+          m_accountRepository(accountRepository), m_contactReader(contactReader),
           m_mailTagReader(mailTagReader), m_mailboxStatisticsReader(mailboxStatisticsReader),
           m_mailboxMessageReader(mailboxMessageReader), m_mailboxFilterReader(mailboxFilterReader),
           m_accountRuntime(accountRuntime), m_errorCoordinator(errorCoordinator),
@@ -1049,6 +1116,11 @@ namespace javelin::app
         m_authenticationRefreshHandler = std::move(handler);
     }
 
+    void AccountRuntimeManager::setMailQueryRefreshPort(MailQueryRefreshPort& port)
+    {
+        m_mailQueryRefreshPort = &port;
+    }
+
     void AccountRuntimeManager::networkBecameReachable()
     {
         m_networkAccessManager.clearConnectionCache();
@@ -1408,13 +1480,21 @@ namespace javelin::app
         else
             m_notificationBaselineRetryAttempts.erase(accountId);
 
+        if (m_mailQueryRefreshPort == nullptr)
+        {
+            qWarning().noquote() << "Account synchronization cannot start before mail query "
+                                    "admission is configured"
+                                 << QString::fromStdString(accountId);
+            return;
+        }
+
         auto [coordinatorIt, inserted] = m_coordinators.try_emplace(accountId);
         if (inserted)
         {
             coordinatorIt->second = std::make_unique<AccountSyncCoordinator>(
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
                 m_transportCooldowns, m_accountRepository, m_mailboxReader, m_workScheduler,
-                m_endpointRetryGate, m_authenticationRefreshHandler, this);
+                *m_mailQueryRefreshPort, m_endpointRetryGate, m_authenticationRefreshHandler, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
         }
         if (m_errorCoordinator.authenticationPaused(configuration.settings.connectionId,
@@ -1969,22 +2049,31 @@ namespace javelin::app
                 emailIds.reserve(items->size());
                 for (const auto& item : *items)
                     emailIds.push_back(item.emailId);
-                if (const auto error = windows.replace({
-                        .accountId = intent.accountId,
-                        .mailboxId = intent.mailboxId,
-                        .queryKey = queryKey,
-                        .requestedOffset = intent.offset,
-                        .requestedLimit = intent.limit,
-                        .position = intent.offset,
-                        .returnedLimit = intent.limit,
-                        .total = *total,
-                        .queryState = state,
-                        .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
-                        .emailIds = std::move(emailIds),
-                    }))
-                {
+                auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                    m_databaseConnection, QStringLiteral("Materialize offline mailbox window"));
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
                     co_return javelin::jmap::operationError(*error);
-                }
+                auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                    std::move(transactionResult));
+                if (const auto error = windows.replace(
+                        transaction,
+                        {
+                            .accountId = intent.accountId,
+                            .mailboxId = intent.mailboxId,
+                            .queryKey = queryKey,
+                            .requestedOffset = intent.offset,
+                            .requestedLimit = intent.limit,
+                            .position = intent.offset,
+                            .returnedLimit = intent.limit,
+                            .total = *total,
+                            .queryState = state,
+                            .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
+                            .emailIds = std::move(emailIds),
+                        }))
+                    co_return javelin::jmap::operationError(*error);
+                if (const auto error = transaction.commit())
+                    co_return javelin::jmap::operationError(*error);
                 co_return MailboxWindowSummary{
                     .accountId = std::move(intent.accountId),
                     .mailboxId = std::move(intent.mailboxId),
@@ -1999,17 +2088,206 @@ namespace javelin::app
             }
         }
 
+        const auto requiredSerial = intent.forceRefresh ? ++m_mailboxRefreshSerial : 0;
         const ForegroundWorkScope foreground{m_workScheduler};
+        co_return co_await requestMailboxWindowAdmitted(std::move(intent), requiredSerial);
+    }
+
+    QCoro::Task<MailboxWindowResult>
+    MailQueryApplicationService::requestMailboxWindowAdmitted(MailboxWindowIntent intent,
+                                                              const std::uint64_t requiredSerial)
+    {
+        const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
+            .mailboxId = intent.mailboxId,
+            .sortProperty = javelin::jmap::query::propertyName(intent.sort.property),
+            .isAscending = javelin::jmap::query::isAscending(intent.sort),
+            .collapseThreads = true,
+        });
+        const auto key = mailboxAdmissionKey(intent, queryKey);
+        while (true)
+        {
+            if (const auto active = m_mailboxAdmissions.find(key);
+                active != m_mailboxAdmissions.end())
+            {
+                auto future = active->second.future;
+                if (requiredSerial != 0 && active->second.dispatchSerial < requiredSerial)
+                {
+                    static_cast<void>(co_await qCoro(future).result());
+                    continue;
+                }
+                co_return co_await qCoro(future).result();
+            }
+
+            const auto generation = ++m_admissionGeneration;
+            auto promise = std::make_shared<QPromise<MailboxWindowResult>>();
+            promise->start();
+            auto future = promise->future();
+            m_mailboxAdmissions.emplace(key, MailboxAdmissionState{
+                                                 .generation = generation,
+                                                 .dispatchSerial = m_mailboxRefreshSerial,
+                                                 .future = future,
+                                                 .promise = std::move(promise),
+                                             });
+
+            auto operation = [this, intent]() mutable -> QCoro::Task<MailboxWindowResult>
+            {
+                while (true)
+                {
+                    auto result = co_await executeMailboxWindowNetwork(intent);
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                        co_return *error;
+                    if (const auto* summary = std::get_if<MailboxWindowSummary>(&result))
+                        co_return *summary;
+                    co_await yieldMailQueryRetry();
+                }
+            };
+            auto task = operation();
+            QCoro::connect(std::move(task), this,
+                           [this, key, generation](MailboxWindowResult result)
+                           { completeMailboxAdmission(key, generation, std::move(result)); });
+            co_return co_await qCoro(future).result();
+        }
+    }
+
+    QCoro::Task<MailQueryApplicationService::AdmittedMailboxResult>
+    MailQueryApplicationService::executeMailboxWindowNetwork(MailboxWindowIntent intent)
+    {
+        const auto configuration = m_accountRuntime.connectionSettingsFor(intent.accountId);
+        if (!configuration.has_value())
+            co_return javelin::jmap::OperationError{.message =
+                                                        accountSynchronizationNotConfigured()};
+
+        const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
+            .mailboxId = intent.mailboxId,
+            .sortProperty = javelin::jmap::query::propertyName(intent.sort.property),
+            .isAscending = javelin::jmap::query::isAscending(intent.sort),
+            .collapseThreads = true,
+        });
+        if (isCanonicalMailboxIntent(intent, queryKey))
+        {
+            const auto accountResult = m_accountRepository.findById(intent.accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&accountResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto& account =
+                std::get<std::optional<javelin::jmap::cache::CachedAccount>>(accountResult);
+            if (!account.has_value() || account->remoteAccountId.empty())
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The mail account has no remote JMAP identity."),
+                };
+            }
+
+            javelin::jmap::cache::SessionRepository sessions{m_databaseConnection};
+            const auto sessionResult = sessions.load(intent.accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&sessionResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto& session =
+                std::get<std::optional<javelin::jmap::api::Session>>(sessionResult);
+            if (!session.has_value())
+                co_return javelin::jmap::OperationError{.message =
+                                                            accountSynchronizationNotConfigured()};
+            const auto limits = javelin::jmap::api::coreRequestLimits(*session);
+            if (!limits.has_value())
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::UnsupportedCapability,
+                    .message = QStringLiteral("The cached JMAP session has invalid Core limits."),
+                };
+            }
+
+            javelin::jmap::api::MethodCaller caller{m_methodTransport};
+            const javelin::jmap::api::ApiRequestContext context{
+                .credentials =
+                    {
+                        .accountId = intent.accountId,
+                        .emailAddress = configuration->loginEmail,
+                        .sessionUrl = configuration->sessionUrl,
+                        .token = {.accessToken = configuration->apiKey,
+                                  .refreshToken = std::nullopt,
+                                  .expiry = std::nullopt},
+                    },
+                .apiUrl = session->apiUrl,
+                .requestLimits = *limits,
+            };
+            javelin::jmap::sync::MailboxRefreshExecutor executor{m_databaseConnection, caller,
+                                                                 context};
+            auto refreshResult = co_await executor.refreshCollapsedMailbox(
+                intent.accountId, intent.mailboxId, {}, intent.forceRefresh,
+                account->remoteAccountId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
+            {
+                m_errorCoordinator.reportFailure(*configuration, intent.accountId,
+                                                 QStringLiteral("Load mailbox messages"), *error);
+                co_return *error;
+            }
+            const auto& refresh =
+                std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult);
+            if (refresh.superseded)
+                co_return QueryAdmissionSuperseded{};
+            m_errorCoordinator.reportSuccess(configuration->connectionId);
+
+            javelin::jmap::cache::MailboxWindowRepository windows{m_databaseConnection};
+            const auto cachedResult = windows.find(intent.accountId, queryKey, 0, 100);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto& cached =
+                std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(cachedResult);
+            if (!cached.has_value())
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = QStringLiteral(
+                        "Canonical mailbox refresh did not materialize its query window."),
+                };
+            }
+
+            if (m_threadMaterializationCoordinator != nullptr)
+            {
+                if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                        intent.accountId, queryKey, 0, 100, WorkPriority::VisibleMaterialization))
+                    qWarning().noquote() << "Could not enqueue refreshed mailbox Thread "
+                                            "materialization"
+                                         << error->message;
+            }
+            Q_EMIT cacheCommitted(MailCacheChange{
+                .accountId = QString::fromStdString(intent.accountId),
+                .mailboxIds = {QString::fromStdString(intent.mailboxId)},
+                .queryWindows = {MailboxQueryWindowChange{
+                    .mailboxId = QString::fromStdString(intent.mailboxId),
+                    .offset = 0,
+                    .limit = 100,
+                    .total = cached->total,
+                }},
+                .searchWindows = {},
+                .emailObjectsChanged = !refresh.changedEmailIds.empty(),
+            });
+            co_return MailboxWindowSummary{
+                .accountId = intent.accountId,
+                .mailboxId = intent.mailboxId,
+                .offset = 0,
+                .limit = 100,
+                .position = cached->position,
+                .returnedLimit = cached->returnedLimit,
+                .representativeCount = cached->emailIds.size(),
+                .total = cached->total,
+                .queryState = cached->queryState,
+            };
+        }
+
         auto result = co_await m_queryMaterializer.queryMailboxPage(
             toLiveConnectionSettings(*configuration), intent.accountId, intent.mailboxId,
-            intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
-            intent.anchorOffset);
+            intent.offset, intent.limit, intent.sort, intent.anchor, intent.anchorOffset);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             m_errorCoordinator.reportFailure(*configuration, intent.accountId,
                                              QStringLiteral("Load mailbox messages"), *error);
             co_return *error;
         }
+        if (std::holds_alternative<javelin::jmap::MailQueryMaterializationSuperseded>(result))
+            co_return QueryAdmissionSuperseded{};
         m_errorCoordinator.reportSuccess(configuration->connectionId);
 
         auto page = std::get<javelin::jmap::MailboxPageSummary>(std::move(result));
@@ -2045,6 +2323,39 @@ namespace javelin::app
             .emailObjectsChanged = false,
         });
         co_return summary;
+    }
+
+    void MailQueryApplicationService::completeMailboxAdmission(const std::string& key,
+                                                               const std::uint64_t generation,
+                                                               MailboxWindowResult result)
+    {
+        const auto active = m_mailboxAdmissions.find(key);
+        if (active == m_mailboxAdmissions.end() || active->second.generation != generation)
+            return;
+        auto promise = active->second.promise;
+        m_mailboxAdmissions.erase(active);
+        promise->addResult(std::move(result));
+        promise->finish();
+    }
+
+    QCoro::Task<CanonicalMailboxRefreshResult>
+    MailQueryApplicationService::refreshCanonicalMailbox(std::string accountId,
+                                                         std::string mailboxId)
+    {
+        MailboxWindowIntent intent{
+            .accountId = std::move(accountId),
+            .mailboxId = std::move(mailboxId),
+            .offset = 0,
+            .limit = 100,
+            .sort = {},
+            .forceRefresh = false,
+            .anchor = std::nullopt,
+            .anchorOffset = 1,
+        };
+        auto result = co_await requestMailboxWindowAdmitted(std::move(intent), 0);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+            co_return *error;
+        co_return CanonicalMailboxRefreshSummary{.cacheChanged = true};
     }
 
     void MailQueryApplicationService::ensureThread(ThreadMaterializationIntent intent)
@@ -2124,20 +2435,28 @@ namespace javelin::app
                 for (const auto& item : *items)
                     emailIds.push_back(item.emailId);
                 javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
-                if (const auto error = searchWindows.replace({
-                        .accountId = intent.accountId,
-                        .queryKey = queryKey,
-                        .offset = intent.offset,
-                        .limit = intent.limit,
-                        .position = intent.offset,
-                        .returnedLimit = intent.limit,
-                        .total = *total,
-                        .queryState = *offlineState,
-                        .emailIds = emailIds,
-                    }))
-                {
+                auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                    m_databaseConnection, QStringLiteral("Materialize offline search window"));
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
                     co_return javelin::jmap::operationError(*error);
-                }
+                auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                    std::move(transactionResult));
+                if (const auto error =
+                        searchWindows.replace(transaction, {
+                                                               .accountId = intent.accountId,
+                                                               .queryKey = queryKey,
+                                                               .offset = intent.offset,
+                                                               .limit = intent.limit,
+                                                               .position = intent.offset,
+                                                               .returnedLimit = intent.limit,
+                                                               .total = *total,
+                                                               .queryState = *offlineState,
+                                                               .emailIds = emailIds,
+                                                           }))
+                    co_return javelin::jmap::operationError(*error);
+                if (const auto error = transaction.commit())
+                    co_return javelin::jmap::operationError(*error);
 
                 Q_EMIT cacheCommitted(MailCacheChange{
                     .accountId = QString::fromStdString(intent.accountId),
@@ -2165,6 +2484,90 @@ namespace javelin::app
             }
         }
 
+        const ForegroundWorkScope foreground{m_workScheduler};
+        co_return co_await requestSearchWindowAdmitted(std::move(intent), leaseKey);
+    }
+
+    QCoro::Task<SearchWindowResult>
+    MailQueryApplicationService::requestSearchWindowAdmitted(SearchWindowIntent intent,
+                                                             std::string leaseKey)
+    {
+        const auto queryKey = intent.windowKey.empty()
+                                  ? javelin::jmap::search::cacheKey(intent.criteria, intent.sort)
+                                  : intent.windowKey;
+        const auto key = searchAdmissionKey(intent, queryKey);
+        if (const auto active = m_searchAdmissions.find(key); active != m_searchAdmissions.end())
+        {
+            auto future = active->second.future;
+            auto result = co_await qCoro(future).result();
+            if (searchWindowRetired(leaseKey))
+            {
+                co_return javelin::jmap::OperationError{
+                    .message = i18n("The search tab has been closed."),
+                };
+            }
+            co_return result;
+        }
+
+        const auto generation = ++m_admissionGeneration;
+        auto promise = std::make_shared<QPromise<SearchWindowResult>>();
+        promise->start();
+        auto future = promise->future();
+        m_searchAdmissions.emplace(key, SearchAdmissionState{
+                                            .generation = generation,
+                                            .future = future,
+                                            .promise = std::move(promise),
+                                        });
+
+        auto operation = [this, intent, leaseKey]() mutable -> QCoro::Task<SearchWindowResult>
+        {
+            while (true)
+            {
+                if (searchWindowRetired(leaseKey))
+                {
+                    co_return javelin::jmap::OperationError{
+                        .message = i18n("The search tab has been closed."),
+                    };
+                }
+                auto result = co_await executeSearchWindowNetwork(intent, leaseKey);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                    co_return *error;
+                if (const auto* summary = std::get_if<SearchWindowSummary>(&result))
+                    co_return *summary;
+                co_await yieldMailQueryRetry();
+            }
+        };
+        auto task = operation();
+        QCoro::connect(std::move(task), this, [this, key, generation](SearchWindowResult result)
+                       { completeSearchAdmission(key, generation, std::move(result)); });
+        auto result = co_await qCoro(future).result();
+        if (searchWindowRetired(leaseKey))
+        {
+            co_return javelin::jmap::OperationError{
+                .message = i18n("The search tab has been closed."),
+            };
+        }
+        co_return result;
+    }
+
+    QCoro::Task<MailQueryApplicationService::AdmittedSearchResult>
+    MailQueryApplicationService::executeSearchWindowNetwork(SearchWindowIntent intent,
+                                                            std::string leaseKey)
+    {
+        if (searchWindowRetired(leaseKey))
+        {
+            co_return javelin::jmap::OperationError{
+                .message = i18n("The search tab has been closed."),
+            };
+        }
+        const auto configuration = m_accountRuntime.connectionSettingsFor(intent.accountId);
+        if (!configuration.has_value())
+            co_return javelin::jmap::OperationError{.message =
+                                                        accountSynchronizationNotConfigured()};
+
+        const auto queryKey = intent.windowKey.empty()
+                                  ? javelin::jmap::search::cacheKey(intent.criteria, intent.sort)
+                                  : intent.windowKey;
         javelin::jmap::search::EmailSearchResolution resolution;
         if (intent.criteria.fromContactsOnly)
         {
@@ -2181,30 +2584,27 @@ namespace javelin::app
             resolution.userKeywords = std::get<std::vector<std::string>>(keywords);
         }
 
-        const auto settings = *configuration;
-        const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_queryMaterializer.searchMessages(
-            toLiveConnectionSettings(settings), intent.accountId, intent.criteria, intent.offset,
-            intent.limit, intent.sort, std::move(intent.anchor), queryKey, {},
+            toLiveConnectionSettings(*configuration), intent.accountId, intent.criteria,
+            intent.offset, intent.limit, intent.sort, intent.anchor, queryKey, {},
             std::move(resolution));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
-            m_errorCoordinator.reportFailure(settings, intent.accountId,
+            m_errorCoordinator.reportFailure(*configuration, intent.accountId,
                                              QStringLiteral("Search messages"), *error);
             co_return *error;
         }
-        m_errorCoordinator.reportSuccess(settings.connectionId);
+        if (std::holds_alternative<javelin::jmap::MailQueryMaterializationSuperseded>(result))
+            co_return QueryAdmissionSuperseded{};
+        m_errorCoordinator.reportSuccess(configuration->connectionId);
 
-        const auto& page = std::get<javelin::jmap::MessageSearchSummary>(result);
         if (searchWindowRetired(leaseKey))
         {
-            static_cast<void>(
-                javelin::jmap::cache::SearchWindowRepository{m_databaseConnection}.eraseQuery(
-                    intent.accountId, queryKey));
             co_return javelin::jmap::OperationError{
                 .message = i18n("The search tab has been closed."),
             };
         }
+        const auto& page = std::get<javelin::jmap::MessageSearchSummary>(result);
         if (m_threadMaterializationCoordinator != nullptr)
         {
             if (const auto error = m_threadMaterializationCoordinator->enqueueSearchWindow(
@@ -2239,15 +2639,55 @@ namespace javelin::app
         co_return summary;
     }
 
+    void MailQueryApplicationService::completeSearchAdmission(const std::string& key,
+                                                              const std::uint64_t generation,
+                                                              SearchWindowResult result)
+    {
+        const auto active = m_searchAdmissions.find(key);
+        if (active == m_searchAdmissions.end() || active->second.generation != generation)
+            return;
+        auto promise = active->second.promise;
+        m_searchAdmissions.erase(active);
+        promise->addResult(std::move(result));
+        promise->finish();
+    }
+
     void MailQueryApplicationService::retireSearchWindow(std::string accountId,
                                                          std::string windowKey)
     {
         const auto leaseKey = searchWindowLeaseKey(accountId, windowKey);
         auto& state = m_searchWindowRequests[leaseKey];
         state.retired = true;
-        static_cast<void>(
-            javelin::jmap::cache::SearchWindowRepository{m_databaseConnection}.eraseQuery(
-                accountId, windowKey));
+
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            m_databaseConnection, QStringLiteral("Retire search window"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+        {
+            qWarning().noquote() << "Could not retire search window" << error->message;
+        }
+        else
+        {
+            auto transaction =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+            javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
+            javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{m_databaseConnection};
+            const auto eraseError = searchWindows.eraseQuery(transaction, accountId, windowKey);
+            const auto revisionError = eraseError.has_value()
+                                           ? std::optional<javelin::jmap::cache::DatabaseError>{}
+                                           : cacheRevisions.advance(transaction, accountId);
+            const auto commitError = eraseError.has_value() || revisionError.has_value()
+                                         ? std::optional<javelin::jmap::cache::DatabaseError>{}
+                                         : transaction.commit();
+            if (eraseError.has_value())
+                qWarning().noquote() << "Could not retire search window" << eraseError->message;
+            else if (revisionError.has_value())
+                qWarning().noquote()
+                    << "Could not fence retired search window" << revisionError->message;
+            else if (commitError.has_value())
+                qWarning().noquote()
+                    << "Could not commit retired search window" << commitError->message;
+        }
         if (state.activeRequests == 0)
             m_searchWindowRequests.erase(leaseKey);
     }

@@ -1,5 +1,7 @@
 #include "jmap/sync/MailboxRefreshExecutor.h"
 
+#include "jmap/sync/MailCacheRevision.h"
+
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/ResponseReader.h"
 #include "jmap/cache/EmailRepository.h"
@@ -730,6 +732,7 @@ namespace javelin::jmap::sync
         javelin::jmap::cache::EmailRepository emailRepository{m_databaseConnection};
         javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{
             m_databaseConnection};
+        javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{m_databaseConnection};
         const auto refreshFenceResult = consistencyRepository.captureRefresh({
             .accountId = accountId,
             .dataType = "Email",
@@ -820,6 +823,12 @@ namespace javelin::jmap::sync
             queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
             queryPlan.sinceState.has_value())
         {
+            const auto revisionResult = cacheRevisions.capture(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto revisionFence =
+                std::get<javelin::jmap::sync::MailCacheRevisionFence>(revisionResult);
             emitProgress(QStringLiteral("Checking for mailbox deltas..."));
             const auto incrementalResult = co_await refreshCollapsedMailboxThreadsIncrementally(
                 m_databaseConnection, m_methodCaller, m_apiRequestContext, accountId,
@@ -863,6 +872,13 @@ namespace javelin::jmap::sync
                         std::get_if<javelin::jmap::cache::DatabaseError>(&fenceCurrent))
                     co_return javelin::jmap::operationError(*error);
                 if (!std::get<bool>(fenceCurrent))
+                    co_return supersededMailboxRefresh();
+                const auto revisionAdvanced =
+                    cacheRevisions.advanceIfCurrent(cacheTransaction, revisionFence);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+                    co_return javelin::jmap::operationError(*error);
+                if (!std::get<bool>(revisionAdvanced))
                     co_return supersededMailboxRefresh();
                 if (!incremental.requiresFullFetch)
                 {
@@ -927,6 +943,12 @@ namespace javelin::jmap::sync
             const auto expectedQueryState =
                 expectedQueryRecord.transform([](const auto& record) { return record.stateToken; });
 
+            const auto revisionResult = cacheRevisions.capture(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+                co_return javelin::jmap::operationError(*error);
+            const auto revisionFence =
+                std::get<javelin::jmap::sync::MailCacheRevisionFence>(revisionResult);
             emitProgress(QStringLiteral("Refreshing mailbox window from the server..."));
             const auto fetchResult = co_await fetchCollapsedMailboxThreads(
                 m_methodCaller, m_apiRequestContext, remoteAccountId, mailboxId, reportProgress);
@@ -979,6 +1001,13 @@ namespace javelin::jmap::sync
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceCurrent))
                 co_return javelin::jmap::operationError(*error);
             if (!std::get<bool>(fenceCurrent))
+                co_return supersededMailboxRefresh();
+            const auto revisionAdvanced =
+                cacheRevisions.advanceIfCurrent(cacheTransaction, revisionFence);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+                co_return javelin::jmap::operationError(*error);
+            if (!std::get<bool>(revisionAdvanced))
                 co_return supersededMailboxRefresh();
 
             const auto expectedQuery = expectedQueryState.has_value()

@@ -409,6 +409,7 @@ set(JAVELIN_FORMAT_FILES
     src/app/ContactApplicationPorts.h
     src/app/MailApplicationTypes.h
     src/app/MailApplicationPorts.h
+    src/app/MailQueryRefreshPort.h
     src/app/messages/MailCommandService.cpp
     src/app/MailCommandService.h
     src/app/MessageContentApplicationPorts.h
@@ -1038,6 +1039,8 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/sync/MailCacheRevision.cpp
+    src/jmap/sync/MailCacheRevision.h
     src/jmap/EmailMutation.h
     src/jmap/render/HtmlBodyEmbedding.cpp
     src/jmap/submission/DraftInlineImageStorage.cpp
@@ -1877,6 +1880,7 @@ add_library(javelin_daemon_core STATIC
     src/app/ContactApplicationPorts.h
     src/app/MailApplicationTypes.h
     src/app/MailApplicationPorts.h
+    src/app/MailQueryRefreshPort.h
     src/app/messages/MailCommandService.cpp
     src/app/MailCommandService.h
     src/app/MessageContentApplicationPorts.h

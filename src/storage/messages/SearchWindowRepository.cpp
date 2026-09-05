@@ -238,8 +238,29 @@ namespace javelin::jmap::cache
     SearchWindowRepository::eraseQuery(const std::string_view accountId,
                                        const std::string_view queryKey)
     {
-        if (const auto error = m_connection.validate())
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin search-window deletion"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = eraseQuery(transaction, accountId, queryKey))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    SearchWindowRepository::eraseQuery(DatabaseTransaction& transaction,
+                                       const std::string_view accountId,
+                                       const std::string_view queryKey)
+    {
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "Search-window deletion requires an active matching transaction"),
+            };
+        }
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "DELETE FROM search_windows WHERE account_id=:account_id AND query_key=:query_key"));

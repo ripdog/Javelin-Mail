@@ -2,6 +2,7 @@
 
 #include "app/AccountConnectionSettings.h"
 #include "app/MailApplicationTypes.h"
+#include "app/MailQueryRefreshPort.h"
 #include "app/account/EndpointRetryGate.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
@@ -58,7 +59,7 @@ namespace javelin::app
             javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
             javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
-            EndpointRetryGate& endpointRetryGate,
+            MailQueryRefreshPort& mailQueryRefreshPort, EndpointRetryGate& endpointRetryGate,
             javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler = {},
             QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
@@ -212,6 +213,7 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         WorkScheduler& m_workScheduler;
+        MailQueryRefreshPort& m_mailQueryRefreshPort;
         EndpointRetryGate& m_endpointRetryGate;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         std::optional<AccountConnectionSettings> m_settings;

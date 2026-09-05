@@ -1,5 +1,7 @@
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
 
+#include "jmap/sync/MailCacheRevision.h"
+
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/ResponseReader.h"
 #include "jmap/cache/EmailRepository.h"
@@ -628,6 +630,12 @@ namespace javelin::jmap::sync
             const auto& workingSet = std::get<std::vector<std::string>>(workingSetResult);
 
             ConsistencyDomainRepository consistency{databaseConnection};
+            MailCacheRevisionRepository cacheRevisions{databaseConnection};
+            const auto revisionResult = cacheRevisions.capture(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+                co_return operationError(*error);
+            const auto revisionFence = std::get<MailCacheRevisionFence>(revisionResult);
             const auto fenceResult =
                 consistency.captureRefresh({.accountId = accountId, .dataType = "Email"});
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceResult))
@@ -822,6 +830,17 @@ namespace javelin::jmap::sync
                 superseded.superseded = true;
                 co_return superseded;
             }
+            const auto revisionAdvanced =
+                cacheRevisions.advanceIfCurrent(transaction.cacheTransaction(), revisionFence);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+                co_return operationError(*error);
+            if (!std::get<bool>(revisionAdvanced))
+            {
+                MailDeltaRefreshSummary superseded;
+                superseded.superseded = true;
+                co_return superseded;
+            }
 
             javelin::jmap::cache::SyncStateRepository states{databaseConnection};
             const auto expected = expectedState.has_value()
@@ -948,6 +967,11 @@ namespace javelin::jmap::sync
             co_return summary;
 
         ConsistencyDomainRepository consistency{m_databaseConnection};
+        MailCacheRevisionRepository cacheRevisions{m_databaseConnection};
+        const auto revisionResult = cacheRevisions.capture(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+            co_return operationError(*error);
+        const auto revisionFence = std::get<MailCacheRevisionFence>(revisionResult);
         std::optional<RefreshFence> mailboxFence;
         if (mailboxState.has_value())
         {
@@ -1315,6 +1339,15 @@ namespace javelin::jmap::sync
                 summary.superseded = true;
                 co_return summary;
             }
+        }
+        const auto revisionAdvanced =
+            cacheRevisions.advanceIfCurrent(transaction.cacheTransaction(), revisionFence);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+            co_return operationError(*error);
+        if (!std::get<bool>(revisionAdvanced))
+        {
+            summary.superseded = true;
+            co_return summary;
         }
         if (parsed.mailboxChanges.has_value())
         {

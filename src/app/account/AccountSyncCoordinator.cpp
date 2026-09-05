@@ -9,7 +9,6 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
-#include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
 #include "jmap/sync/MutationJournal.h"
 #include "jmap/sync/PreferredStateChangeSource.h"
@@ -74,14 +73,14 @@ namespace javelin::app
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
-        EndpointRetryGate& endpointRetryGate,
+        MailQueryRefreshPort& mailQueryRefreshPort, EndpointRetryGate& endpointRetryGate,
         javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler,
         QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
           m_mailboxReader(mailboxReader), m_workScheduler(workScheduler),
-          m_endpointRetryGate(endpointRetryGate),
+          m_mailQueryRefreshPort(mailQueryRefreshPort), m_endpointRetryGate(endpointRetryGate),
           m_authenticationRefreshHandler(std::move(authenticationRefreshHandler))
     {
         m_refreshClock.start();
@@ -768,70 +767,20 @@ namespace javelin::app
             co_return;
         }
 
-        javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
-            m_databaseConnection, methodCaller, apiRequestContext};
-        auto refreshMailboxes =
+        const auto refreshMailboxes =
             mailboxRefreshTargets(runContext->configuration.mailboxes, demand.mailboxIds);
-        if (!demand.mailboxIds.empty())
-        {
-            const auto mailboxTreeResult =
-                m_mailboxReader.listMailboxTree(runContext->configuration.accountId);
-            const auto* mailboxTree =
-                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxTreeResult);
-            if (mailboxTree != nullptr)
-            {
-                for (auto& [mailboxId, mailboxName] : refreshMailboxes)
-                {
-                    if (!mailboxName.empty())
-                        continue;
-                    if (const auto found = std::ranges::find(
-                            *mailboxTree, mailboxId, &javelin::jmap::cache::MailboxTreeItem::id);
-                        found != mailboxTree->end())
-                        mailboxName = found->name;
-                }
-            }
-        }
         for (const auto& [mailboxId, mailboxName] : refreshMailboxes)
         {
+            static_cast<void>(mailboxName);
             if (!shouldRefreshMailboxWindow(refreshEveryMailbox, queryAffectedMailboxIds,
                                             demand.mailboxIds, mailboxId))
                 continue;
-            const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-                runContext->configuration.accountId, mailboxId, {}, false,
-                runContext->configuration.remoteAccountId);
-            if (const auto* summary =
-                    std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
+            const auto refreshResult = co_await m_mailQueryRefreshPort.refreshCanonicalMailbox(
+                runContext->configuration.accountId, mailboxId);
+            if (std::holds_alternative<CanonicalMailboxRefreshSummary>(refreshResult))
             {
                 endpointRequestSucceeded = true;
-                if (summary->superseded)
-                {
-                    m_shouldCatchUpRefreshOnReconnect = true;
-                }
-                else
-                {
-                    m_shouldCatchUpRefreshOnReconnect = false;
-                    std::vector<MailboxQueryWindowChange> queryWindows;
-                    if (summary->canonicalWindowMaterialized)
-                    {
-                        queryWindows.push_back(MailboxQueryWindowChange{
-                            .mailboxId = QString::fromStdString(mailboxId),
-                            .offset = 0,
-                            .limit = 100,
-                            .total = std::nullopt,
-                        });
-                    }
-                    if (summary->canonicalWindowMaterialized || !summary->changedEmailIds.empty())
-                    {
-                        Q_EMIT cacheCommitted(MailCacheChange{
-                            .accountId = committedAccountId,
-                            .mailboxIds = {QString::fromStdString(mailboxId)},
-                            .queryWindows = std::move(queryWindows),
-                            .searchWindows = {},
-                            .mailboxTreeChanged = false,
-                            .emailObjectsChanged = !summary->changedEmailIds.empty(),
-                        });
-                    }
-                }
+                m_shouldCatchUpRefreshOnReconnect = false;
             }
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {

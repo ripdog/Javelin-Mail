@@ -41,6 +41,7 @@ namespace javelin::jmap::cache
 namespace javelin::app
 {
     class ApplicationErrorCoordinator;
+    class MailQueryRefreshPort;
     class WorkScheduler;
 
     struct AccountSyncConfiguration
@@ -79,6 +80,7 @@ namespace javelin::app
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
         void
         setAuthenticationRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
+        void setMailQueryRefreshPort(MailQueryRefreshPort& port);
         void networkBecameReachable();
         void setObservedMailboxIds(std::string accountId, std::vector<std::string> mailboxIds);
         [[nodiscard]] std::unordered_map<std::string, AccountSyncCoordinator::Status>
@@ -133,6 +135,7 @@ namespace javelin::app
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
+        MailQueryRefreshPort* m_mailQueryRefreshPort = nullptr;
         EndpointRetryGate m_endpointRetryGate;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;

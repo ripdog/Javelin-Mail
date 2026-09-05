@@ -48,6 +48,9 @@ namespace javelin::jmap::cache
                                                                   std::string_view accountId);
         [[nodiscard]] std::optional<DatabaseError> eraseQuery(std::string_view accountId,
                                                               std::string_view queryKey);
+        [[nodiscard]] std::optional<DatabaseError> eraseQuery(DatabaseTransaction& transaction,
+                                                              std::string_view accountId,
+                                                              std::string_view queryKey);
 
       private:
         DatabaseConnection& m_connection;

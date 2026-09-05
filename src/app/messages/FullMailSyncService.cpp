@@ -10,6 +10,7 @@
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/query/MailQueryClient.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "storage/sqlite/DatabaseConnection.h"
@@ -90,6 +91,7 @@ namespace javelin::app
 
             QString error;
             bool restartRequired = false;
+            bool superseded = false;
             std::vector<std::size_t> windowOffsets;
             std::size_t representativeCount = 0;
         };
@@ -97,9 +99,9 @@ namespace javelin::app
         [[nodiscard]] FullMailboxPageCommit commitFullMailboxPage(
             const QString& databasePath, const std::string& accountId, const std::string& mailboxId,
             const std::string& syncJobId, const std::uint64_t generation,
-            const std::size_t position, std::vector<std::string> emailIds,
-            std::vector<javelin::jmap::domain::Email> emails, std::string queryState,
-            std::string emailState, const std::optional<std::size_t> total)
+            const std::uint64_t cacheRevision, const std::size_t position,
+            std::vector<std::string> emailIds, std::vector<javelin::jmap::domain::Email> emails,
+            std::string queryState, std::string emailState, const std::optional<std::size_t> total)
         {
             javelin::jmap::cache::ThreadConnectionFactory factory({
                 .connectionNamePrefix = QStringLiteral("full-mail-page"),
@@ -150,11 +152,34 @@ namespace javelin::app
                 existingPreview.finish();
             }
 
+            auto emailTransactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Commit full mailbox Email page"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&emailTransactionResult))
+                return FullMailboxPageCommit{error->message};
+            auto emailTransaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(emailTransactionResult));
+            javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{connection};
+            const auto revisionAdvanced = cacheRevisions.advanceIfCurrent(
+                emailTransaction.cacheTransaction(),
+                {.accountId = accountId, .revision = cacheRevision});
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
+                return FullMailboxPageCommit{error->message};
+            if (!std::get<bool>(revisionAdvanced))
+            {
+                FullMailboxPageCommit result;
+                result.superseded = true;
+                return result;
+            }
             javelin::jmap::cache::EmailRepository emailsRepository{connection};
-            if (const auto error = emailsRepository.upsertMany(accountId, emails))
+            if (const auto error = emailsRepository.upsertMany(emailTransaction.cacheTransaction(),
+                                                               accountId, emails))
                 return FullMailboxPageCommit{error->message};
             if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
-                    connection, accountId, emailIds, emailState))
+                    emailTransaction, connection, accountId, emailIds, emailState))
+                return FullMailboxPageCommit{error->message};
+            if (const auto error = emailTransaction.commit())
                 return FullMailboxPageCommit{error->message};
 
             const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
@@ -1163,6 +1188,19 @@ namespace javelin::app
                     << static_cast<qulonglong>(position) << "limit"
                     << static_cast<qulonglong>(pageSize) << "expected"
                     << (total.has_value() ? QString::number(*total) : QStringLiteral("unknown"));
+                javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{m_connection};
+                const auto revisionResult = cacheRevisions.capture(scope.accountId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&revisionResult))
+                {
+                    static_cast<void>(m_scheduler.update(
+                        scope.jobId, WorkStatus::Failed, progress,
+                        checkpoint(QStringLiteral("enumerating"), position, generation),
+                        error->message));
+                    co_return;
+                }
+                const auto cacheRevision =
+                    std::get<javelin::jmap::sync::MailCacheRevisionFence>(revisionResult).revision;
                 auto pageResult = co_await m_queryClient.fetchFullMailboxPage(
                     liveSettings(*accountSettings), scope.accountId, scope.mailboxId, position,
                     pageSize, anchor);
@@ -1193,14 +1231,18 @@ namespace javelin::app
                 auto page = std::get<javelin::jmap::FullMailboxPage>(std::move(pageResult));
                 const auto pagePosition = page.position;
                 const auto pageCount = page.emailIds.size();
-                auto commitFuture =
-                    QtConcurrent::run(commitFullMailboxPage, m_connection.database().databaseName(),
-                                      scope.accountId, scope.mailboxId, scope.jobId, generation,
-                                      pagePosition, page.emailIds, std::move(page.emails),
-                                      page.queryState, std::move(page.emailState), page.total);
+                auto commitFuture = QtConcurrent::run(
+                    commitFullMailboxPage, m_connection.database().databaseName(), scope.accountId,
+                    scope.mailboxId, scope.jobId, generation, cacheRevision, pagePosition,
+                    page.emailIds, std::move(page.emails), page.queryState,
+                    std::move(page.emailState), page.total);
                 const auto commit = co_await qCoro(commitFuture).takeResult();
                 if (!self)
                     co_return;
+                if (commit.superseded)
+                {
+                    continue;
+                }
                 if (commit.restartRequired)
                 {
                     const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};

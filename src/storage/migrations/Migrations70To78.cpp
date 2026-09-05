@@ -61,6 +61,73 @@ namespace javelin::jmap::cache::migrations
                             "ALTER TABLE calendar_reminder_occurrences ADD COLUMN end_utc TEXT"),
                     },
             },
+            MigrationStep{
+                .version = 74,
+                .name = QStringLiteral("mail_cache_revision"),
+                .statements =
+                    {
+                        QStringLiteral(
+                            "CREATE TABLE mail_cache_revisions (account_id TEXT PRIMARY KEY "
+                            "REFERENCES accounts(account_id) ON DELETE CASCADE, revision INTEGER "
+                            "NOT NULL DEFAULT 0 CHECK(revision>=0), updated_at TEXT NOT NULL "
+                            "DEFAULT "
+                            "CURRENT_TIMESTAMP) STRICT"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_email_insert AFTER INSERT ON "
+                            "emails "
+                            "BEGIN INSERT INTO mail_cache_revisions(account_id,revision) "
+                            "VALUES(NEW.account_id,1) ON CONFLICT(account_id) DO UPDATE SET "
+                            "revision=revision+1,updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_email_update AFTER UPDATE ON "
+                            "emails "
+                            "BEGIN INSERT INTO mail_cache_revisions(account_id,revision) "
+                            "VALUES(NEW.account_id,1) ON CONFLICT(account_id) DO UPDATE SET "
+                            "revision=revision+1,updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_email_delete AFTER DELETE ON "
+                            "emails "
+                            "BEGIN INSERT INTO mail_cache_revisions(account_id,revision) "
+                            "VALUES(OLD.account_id,1) ON CONFLICT(account_id) DO UPDATE SET "
+                            "revision=revision+1,updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_mailbox_window_insert AFTER INSERT "
+                            "ON mailbox_query_windows BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(NEW.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_mailbox_window_update AFTER UPDATE "
+                            "ON mailbox_query_windows BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(NEW.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_mailbox_window_delete AFTER DELETE "
+                            "ON mailbox_query_windows BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_search_window_insert AFTER INSERT "
+                            "ON search_windows BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(NEW.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_search_window_update AFTER UPDATE "
+                            "ON search_windows BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(NEW.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_search_window_delete AFTER DELETE "
+                            "ON search_windows BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

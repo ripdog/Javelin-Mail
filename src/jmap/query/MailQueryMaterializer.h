@@ -43,7 +43,12 @@ namespace javelin::jmap
         std::vector<javelin::jmap::cache::MessageListItem> results;
     };
 
-    using MessageSearchResult = std::variant<MessageSearchSummary, OperationError>;
+    struct MailQueryMaterializationSuperseded
+    {
+    };
+
+    using MessageSearchResult =
+        std::variant<MessageSearchSummary, MailQueryMaterializationSuperseded, OperationError>;
 
     struct MailboxPageSummary
     {
@@ -59,7 +64,8 @@ namespace javelin::jmap
         std::vector<javelin::jmap::cache::MessageListItem> results;
     };
 
-    using MailboxPageResult = std::variant<MailboxPageSummary, OperationError>;
+    using MailboxPageResult =
+        std::variant<MailboxPageSummary, MailQueryMaterializationSuperseded, OperationError>;
 
     class MailQueryMaterializer
     {
