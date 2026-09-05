@@ -590,7 +590,7 @@ namespace javelin::protocol
                     for (const auto& mailboxId : value.mailboxIds)
                         size += stringSize(mailboxId);
                     for (const auto& window : value.mailboxWindows)
-                        size += 32 + stringSize(window.mailboxId);
+                        size += 32 + stringSize(window.mailboxId) + stringSize(window.queryKey);
                     for (const auto& window : value.searchWindows)
                         size += 32 + stringSize(window.queryKey);
                     return size;

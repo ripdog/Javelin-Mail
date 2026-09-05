@@ -719,14 +719,16 @@ namespace javelin::protocol
         bool writeMailboxWindowInvalidation(PayloadWriter& writer,
                                             const MailboxWindowInvalidation& window)
         {
-            return writer.string(window.mailboxId) && writer.qword(window.offset) &&
-                   writer.qword(window.limit) && writeOptionalSize(writer, window.total);
+            return writer.string(window.mailboxId) && writer.string(window.queryKey) &&
+                   writer.qword(window.offset) && writer.qword(window.limit) &&
+                   writeOptionalSize(writer, window.total);
         }
 
         bool readMailboxWindowInvalidation(PayloadReader& reader, MailboxWindowInvalidation& window)
         {
-            return reader.string(window.mailboxId) && reader.qword(window.offset) &&
-                   reader.qword(window.limit) && readOptionalSize(reader, window.total);
+            return reader.string(window.mailboxId) && reader.string(window.queryKey) &&
+                   reader.qword(window.offset) && reader.qword(window.limit) &&
+                   readOptionalSize(reader, window.total);
         }
 
         bool writeSearchWindowInvalidation(PayloadWriter& writer,
@@ -1910,6 +1912,7 @@ namespace javelin::protocol
                                          [&window](const MailboxWindowInvalidation& existing)
                                          {
                                              return existing.mailboxId == window.mailboxId &&
+                                                    existing.queryKey == window.queryKey &&
                                                     existing.offset == window.offset &&
                                                     existing.limit == window.limit;
                                          });

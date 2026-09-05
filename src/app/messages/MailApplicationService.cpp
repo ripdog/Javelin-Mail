@@ -1803,6 +1803,7 @@ namespace javelin::app
 
     void MailQueryApplicationService::publishMailboxWindowCommitted(QString accountId,
                                                                     QString mailboxId,
+                                                                    QString queryKey,
                                                                     const std::size_t offset,
                                                                     const std::size_t limit)
     {
@@ -1811,6 +1812,7 @@ namespace javelin::app
             .mailboxIds = {},
             .queryWindows = {MailboxQueryWindowChange{
                 .mailboxId = std::move(mailboxId),
+                .queryKey = std::move(queryKey),
                 .offset = offset,
                 .limit = limit,
                 .total = std::nullopt,
@@ -1856,7 +1858,8 @@ namespace javelin::app
         mailboxWindows.prepare(QStringLiteral(
             "WITH requested(thread_id) AS MATERIALIZED (SELECT value FROM "
             "json_each(:thread_ids_json)) "
-            "SELECT DISTINCT w.mailbox_id,w.requested_offset,w.requested_limit,w.total FROM "
+            "SELECT DISTINCT w.mailbox_id,w.query_key,w.requested_offset,w.requested_limit,w.total "
+            "FROM "
             "requested r CROSS JOIN emails e INDEXED BY idx_emails_thread ON "
             "e.account_id=:account_id AND e.thread_id=r.thread_id CROSS JOIN "
             "mailbox_query_window_items i INDEXED BY idx_mailbox_query_window_items_email ON "
@@ -1888,11 +1891,12 @@ namespace javelin::app
         {
             change.queryWindows.push_back(MailboxQueryWindowChange{
                 .mailboxId = mailboxWindows.value(0).toString(),
-                .offset = mailboxWindows.value(1).toULongLong(),
-                .limit = mailboxWindows.value(2).toULongLong(),
-                .total = mailboxWindows.value(3).isNull()
+                .queryKey = mailboxWindows.value(1).toString(),
+                .offset = mailboxWindows.value(2).toULongLong(),
+                .limit = mailboxWindows.value(3).toULongLong(),
+                .total = mailboxWindows.value(4).isNull()
                              ? std::nullopt
-                             : std::optional<std::size_t>{mailboxWindows.value(3).toULongLong()},
+                             : std::optional<std::size_t>{mailboxWindows.value(4).toULongLong()},
             });
         }
 
@@ -2257,6 +2261,7 @@ namespace javelin::app
                 .mailboxIds = {QString::fromStdString(intent.mailboxId)},
                 .queryWindows = {MailboxQueryWindowChange{
                     .mailboxId = QString::fromStdString(intent.mailboxId),
+                    .queryKey = QString::fromStdString(queryKey),
                     .offset = 0,
                     .limit = 100,
                     .total = cached->total,
@@ -2315,6 +2320,7 @@ namespace javelin::app
             .mailboxIds = {QString::fromStdString(page.mailboxId)},
             .queryWindows = {MailboxQueryWindowChange{
                 .mailboxId = QString::fromStdString(page.mailboxId),
+                .queryKey = QString::fromStdString(queryKey),
                 .offset = page.offset,
                 .limit = page.limit,
                 .total = page.total,

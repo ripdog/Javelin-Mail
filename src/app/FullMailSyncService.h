@@ -53,8 +53,8 @@ namespace javelin::app
         void requestMailboxResync(std::string_view accountId, std::string_view mailboxId);
 
       Q_SIGNALS:
-        void mailboxWindowCommitted(QString accountId, QString mailboxId, quint64 offset,
-                                    quint64 limit);
+        void mailboxWindowCommitted(QString accountId, QString mailboxId, QString queryKey,
+                                    quint64 offset, quint64 limit);
         void messageContentCommitted(QString accountId, QString emailId);
 
       private:

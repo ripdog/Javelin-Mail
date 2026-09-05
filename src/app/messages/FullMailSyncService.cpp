@@ -1279,9 +1279,16 @@ namespace javelin::app
                         commit.error));
                     co_return;
                 }
+                const auto committedQueryKey = javelin::jmap::sync::mailboxQueryKey({
+                    .mailboxId = scope.mailboxId,
+                    .sortProperty = "receivedAt",
+                    .isAscending = false,
+                    .collapseThreads = true,
+                });
                 for (const auto offset : commit.windowOffsets)
                     Q_EMIT mailboxWindowCommitted(QString::fromStdString(scope.accountId),
-                                                  QString::fromStdString(scope.mailboxId), offset,
+                                                  QString::fromStdString(scope.mailboxId),
+                                                  QString::fromStdString(committedQueryKey), offset,
                                                   canonicalWindowSize);
                 if (pagePosition == 0)
                 {

@@ -178,13 +178,6 @@ namespace javelin::app
                     if (retainedWindowChanged)
                     {
                         beginRelevantRefresh();
-                        if (m_state.refreshInFlight)
-                        {
-                            ++m_refreshRequestId;
-                            m_state.refreshInFlight = false;
-                            m_refreshAwaitingCache = false;
-                            Q_EMIT stateChanged();
-                        }
                         reloadProjectedWindows();
                         return;
                     }
@@ -651,7 +644,8 @@ namespace javelin::app
                     m_state.stale = !queryStateConsistent;
                     m_state.refreshError.clear();
                     m_state.loadMoreError.clear();
-                    if (m_state.loadMoreInFlight && pendingIndex < windows.size())
+                    if (m_state.loadMoreInFlight && pendingIndex < windows.size() &&
+                        m_pendingLoadMoreRequestCompleted)
                     {
                         m_state.loadMoreInFlight = false;
                         m_pendingLoadMoreOffset.reset();
@@ -693,12 +687,15 @@ namespace javelin::app
                              metadata.position + metadata.itemCount >= *metadata.total) ||
                             (!metadata.total.has_value() && metadata.returnedLimit > 0 &&
                              metadata.itemCount < metadata.returnedLimit);
-                        m_state.loadMoreInFlight = false;
                         m_state.loadMoreError.clear();
-                        m_pendingLoadMoreOffset.reset();
-                        m_pendingLoadMoreAnchor.reset();
-                        m_pendingLoadMoreCommitted = false;
-                        m_pendingLoadMoreRequestCompleted = false;
+                        if (m_pendingLoadMoreRequestCompleted)
+                        {
+                            m_state.loadMoreInFlight = false;
+                            m_pendingLoadMoreOffset.reset();
+                            m_pendingLoadMoreAnchor.reset();
+                            m_pendingLoadMoreCommitted = false;
+                            m_pendingLoadMoreRequestCompleted = false;
+                        }
                         m_state.stale = true;
                     }
                     else if (!m_pendingLoadMoreCommitted && m_pendingLoadMoreAnchor.has_value())
@@ -922,6 +919,7 @@ namespace javelin::app
                             .displayCurrent = false,
                         });
                     }
+                    m_pendingLoadMoreRequestCompleted = true;
                     reloadProjectedWindows();
                 }
             });

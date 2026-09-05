@@ -311,7 +311,8 @@ TEST_CASE("search session raises Thread expansion materialization priority",
     CHECK(materialization.ensuredThread->threadId == "thread-1");
 }
 
-TEST_CASE("search cache commit terminates its visible refresh", "[app][search-session]")
+TEST_CASE("search cache invalidation does not complete its visible refresh",
+          "[app][search-session][ordering]")
 {
     ApplicationGuard application;
     auto context = makeSessionContext(QStringLiteral("search-session-commit-test"));
@@ -351,15 +352,15 @@ TEST_CASE("search cache commit terminates its visible refresh", "[app][search-se
             },
     });
 
-    CHECK_FALSE(session.state().refreshInFlight);
+    CHECK(session.state().refreshInFlight);
 
     materialization.complete(javelin::jmap::OperationError{
-        .message = QStringLiteral("Late search terminal event must be ignored."),
+        .message = QStringLiteral("Correlated search terminal reply."),
     });
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    waitFor([&] { return !session.state().refreshInFlight; });
 
-    CHECK_FALSE(session.state().refreshInFlight);
-    CHECK(failureCount == 0);
+    CHECK(session.state().refreshError == QStringLiteral("Correlated search terminal reply."));
+    CHECK(failureCount == 1);
 }
 
 TEST_CASE("missing initial online-search cache materializes itself after the cache read",

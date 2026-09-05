@@ -921,8 +921,11 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
         .optimisticProjection = true,
         .mailboxIds = {QStringLiteral("c")},
         .messageContentEmailIds = {QStringLiteral("email-1")},
-        .mailboxWindows =
-            {{.mailboxId = QStringLiteral("c"), .offset = 0, .limit = 100, .total = 113}},
+        .mailboxWindows = {{.mailboxId = QStringLiteral("c"),
+                            .queryKey = QStringLiteral("mailbox-query-c"),
+                            .offset = 0,
+                            .limit = 100,
+                            .total = 113}},
         .searchWindows = {{.queryKey = QStringLiteral("search-1"),
                            .offset = 100,
                            .limit = 50,
@@ -939,6 +942,7 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
     CHECK(invalidation->messageContentEmailIds == std::vector{QStringLiteral("email-1")});
     REQUIRE(invalidation->mailboxWindows.size() == 1);
     CHECK(invalidation->mailboxWindows.front().mailboxId == QStringLiteral("c"));
+    CHECK(invalidation->mailboxWindows.front().queryKey == QStringLiteral("mailbox-query-c"));
     CHECK(invalidation->mailboxWindows.front().total == std::optional<std::uint64_t>{113});
     REQUIRE(invalidation->searchWindows.size() == 1);
     CHECK(invalidation->searchWindows.front().queryKey == QStringLiteral("search-1"));

@@ -20,6 +20,7 @@ TEST_CASE("cache invalidation publisher coalesces one account after commit",
         .mailboxIds = {QStringLiteral("mailbox-a")},
         .queryWindows = {{
             .mailboxId = QStringLiteral("mailbox-a"),
+            .queryKey = QStringLiteral("query-a"),
             .offset = 0,
             .limit = 50,
             .total = 100,

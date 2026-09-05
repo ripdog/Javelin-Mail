@@ -27,6 +27,7 @@ namespace javelin::app
                                      [&value](const auto& existing)
                                      {
                                          return existing.mailboxId == value.mailboxId &&
+                                                existing.queryKey == value.queryKey &&
                                                 existing.offset == value.offset &&
                                                 existing.limit == value.limit;
                                      });

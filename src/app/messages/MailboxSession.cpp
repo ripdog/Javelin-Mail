@@ -210,13 +210,6 @@ namespace javelin::app
                         if (retainedFilteredWindowChanged)
                         {
                             beginRelevantRefresh();
-                            if (m_state.refreshInFlight)
-                            {
-                                ++m_refreshRequestId;
-                                m_state.refreshInFlight = false;
-                                m_refreshAwaitingCache = false;
-                                Q_EMIT stateChanged();
-                            }
                             reloadProjectedWindows();
                             return;
                         }
@@ -238,9 +231,11 @@ namespace javelin::app
                     }
 
                     bool retainedWindowChanged = false;
+                    const auto currentQueryKey = queryKey();
                     for (const auto& changed : change.queryWindows)
                     {
-                        if (changed.mailboxId.toStdString() != m_mailboxId)
+                        if (changed.mailboxId.toStdString() != m_mailboxId ||
+                            changed.queryKey.toStdString() != currentQueryKey)
                             continue;
                         retainedWindowChanged =
                             std::ranges::any_of(m_windows,
@@ -255,13 +250,6 @@ namespace javelin::app
                     if (retainedWindowChanged)
                     {
                         beginRelevantRefresh();
-                        if (m_state.refreshInFlight)
-                        {
-                            ++m_refreshRequestId;
-                            m_state.refreshInFlight = false;
-                            m_refreshAwaitingCache = false;
-                            Q_EMIT stateChanged();
-                        }
                         reloadProjectedWindows();
                         return;
                     }
@@ -460,7 +448,7 @@ namespace javelin::app
                     m_state.stale = !queryStateConsistent;
                     m_state.refreshError.clear();
                     m_state.loadMoreError.clear();
-                    if (m_state.loadMoreInFlight)
+                    if (m_state.loadMoreInFlight && m_pendingLoadMoreRequestCompleted)
                     {
                         m_state.loadMoreInFlight = false;
                         m_pendingLoadMoreOffset.reset();
@@ -508,9 +496,12 @@ namespace javelin::app
                             (!metadata.total.has_value() && metadata.returnedLimit > 0 &&
                              metadata.itemCount < metadata.returnedLimit);
                         m_state.loadMoreError.clear();
-                        m_pendingLoadMoreOffset.reset();
-                        m_state.loadMoreInFlight = false;
-                        m_pendingLoadMoreRequestCompleted = false;
+                        if (m_pendingLoadMoreRequestCompleted)
+                        {
+                            m_pendingLoadMoreOffset.reset();
+                            m_state.loadMoreInFlight = false;
+                            m_pendingLoadMoreRequestCompleted = false;
+                        }
                     }
                     else if (m_pendingLoadMoreRequestCompleted)
                     {

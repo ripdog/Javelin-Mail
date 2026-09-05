@@ -101,6 +101,7 @@ namespace javelin::protocol
     struct MailboxWindowInvalidation
     {
         QString mailboxId;
+        QString queryKey;
         std::uint64_t offset = 0;
         std::uint64_t limit = 0;
         std::optional<std::uint64_t> total;

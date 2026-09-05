@@ -95,6 +95,7 @@ namespace javelin::app
         {
             change.queryWindows.push_back({
                 .mailboxId = window.mailboxId,
+                .queryKey = window.queryKey,
                 .offset = static_cast<std::size_t>(window.offset),
                 .limit = static_cast<std::size_t>(window.limit),
                 .total = window.total.transform([](const std::uint64_t total)

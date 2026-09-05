@@ -99,8 +99,11 @@ TEST_CASE("GUI mail events preserve equal account and mailbox identifiers", "[ap
         .affectedKeys = {QStringLiteral("c")},
         .accountId = QStringLiteral("c"),
         .mailboxIds = {QStringLiteral("c")},
-        .mailboxWindows =
-            {{.mailboxId = QStringLiteral("c"), .offset = 0, .limit = 100, .total = 113}},
+        .mailboxWindows = {{.mailboxId = QStringLiteral("c"),
+                            .queryKey = QStringLiteral("mailbox-query-c"),
+                            .offset = 0,
+                            .limit = 100,
+                            .total = 113}},
     });
 
     REQUIRE(received.has_value());
@@ -108,6 +111,7 @@ TEST_CASE("GUI mail events preserve equal account and mailbox identifiers", "[ap
     CHECK(received->change.mailboxIds == QStringList{QStringLiteral("c")});
     REQUIRE(received->change.queryWindows.size() == 1);
     CHECK(received->change.queryWindows.front().mailboxId == QStringLiteral("c"));
+    CHECK(received->change.queryWindows.front().queryKey == QStringLiteral("mailbox-query-c"));
     CHECK(received->change.queryWindows.front().total == std::optional<std::size_t>{113});
 }
 

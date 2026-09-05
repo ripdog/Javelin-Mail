@@ -108,8 +108,8 @@ namespace javelin::app
         void ensureThread(ThreadMaterializationIntent intent) override;
         void retireSearchWindow(std::string accountId, std::string windowKey) override;
         void publishCacheChange(MailCacheChange change) override;
-        void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
-                                           std::size_t limit);
+        void publishMailboxWindowCommitted(QString accountId, QString mailboxId, QString queryKey,
+                                           std::size_t offset, std::size_t limit);
         void publishThreadMaterializationCommitted(QString accountId, const QStringList& threadIds);
 
       Q_SIGNALS:

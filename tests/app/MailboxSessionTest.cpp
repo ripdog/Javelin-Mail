@@ -306,6 +306,7 @@ namespace
                     .accountId = QStringLiteral("account-1"),
                     .mailboxIds = {},
                     .queryWindows = {{.mailboxId = QStringLiteral("mailbox-1"),
+                                      .queryKey = QString::fromStdString(mailboxQueryKey()),
                                       .offset = offset,
                                       .limit = limit,
                                       .total = 4}},
@@ -363,7 +364,8 @@ TEST_CASE("mailbox session raises Thread expansion materialization priority",
     CHECK(materialization.ensuredThread->threadId == "thread-1");
 }
 
-TEST_CASE("mailbox cache commit terminates its visible refresh", "[app][mailbox-session]")
+TEST_CASE("mailbox cache invalidation does not complete its visible refresh",
+          "[app][mailbox-session][ordering]")
 {
     ApplicationGuard application;
     auto context = makeSessionContext(QStringLiteral("mailbox-session-commit-test"));
@@ -385,15 +387,15 @@ TEST_CASE("mailbox cache commit terminates its visible refresh", "[app][mailbox-
     CHECK_FALSE(materialization.lastMailboxIntent->forceRefresh);
 
     events.publish(windowInvalidation(0, 100));
-    CHECK_FALSE(session.state().refreshInFlight);
+    CHECK(session.state().refreshInFlight);
 
     materialization.complete(javelin::jmap::OperationError{
-        .message = QStringLiteral("Late terminal event must be ignored."),
+        .message = QStringLiteral("Correlated terminal reply."),
     });
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    waitFor([&] { return !session.state().refreshInFlight; });
 
-    CHECK_FALSE(session.state().refreshInFlight);
-    CHECK(failureCount == 0);
+    CHECK(session.state().refreshError == QStringLiteral("Correlated terminal reply."));
+    CHECK(failureCount == 1);
 }
 
 TEST_CASE("cached mailbox load retries after a superseding same-account invalidation",
@@ -787,6 +789,41 @@ TEST_CASE("changing mailbox sort invalidates an obsolete refresh completion",
     CHECK(failureCount == 0);
 }
 
+TEST_CASE("mailbox invalidation requires the exact persisted query identity",
+          "[app][mailbox-session][ordering][query-identity]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-query-identity-test"));
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1",
+        "mailbox-1",
+        QStringLiteral("Archive"),
+        std::optional<std::string>{"archive"},
+        {.property = javelin::jmap::query::EmailListSortProperty::Subject,
+         .direction = javelin::jmap::query::EmailListSortDirection::Ascending},
+        context.queries,
+        materialization,
+        100,
+        events};
+
+    std::size_t stateChangeCount = 0;
+    QObject::connect(&session, &javelin::app::MessageListSession::stateChanged, &session,
+                     [&stateChangeCount] { ++stateChangeCount; });
+
+    auto unrelated = windowInvalidation(0, 100);
+    REQUIRE(unrelated.change.queryWindows.size() == 1);
+    CHECK(unrelated.change.queryWindows.front().queryKey ==
+          QString::fromStdString(mailboxQueryKey()));
+    events.publish(std::move(unrelated));
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+
+    CHECK(stateChangeCount == 0);
+    CHECK_FALSE(session.state().refreshInFlight);
+    CHECK_FALSE(materialization.lastMailboxIntent.has_value());
+}
+
 TEST_CASE("mailbox session restores a loaded infinite-scroll prefix from SQLite windows",
           "[app][mailbox-session][infinite-scroll][persistence]")
 {
@@ -869,8 +906,8 @@ TEST_CASE("mailbox session exposes materialization progress only for visible Thr
     CHECK(session.state().refreshError.isEmpty());
 }
 
-TEST_CASE("mailbox infinite scrolling appends a bounded anchored window and ignores late IPC",
-          "[app][mailbox-session][infinite-scroll]")
+TEST_CASE("mailbox infinite scrolling waits for correlated IPC after cache invalidation",
+          "[app][mailbox-session][infinite-scroll][ordering]")
 {
     ApplicationGuard application;
     auto context = makeSessionContext(QStringLiteral("mailbox-session-infinite-scroll-test"));
@@ -925,16 +962,24 @@ TEST_CASE("mailbox infinite scrolling appends a bounded anchored window and igno
     events.publish(windowInvalidation(2, 2));
 
     waitFor([&] { return session.state().items.size() == 4; });
-    CHECK_FALSE(session.state().loadMoreInFlight);
+    CHECK(session.state().loadMoreInFlight);
     CHECK(session.state().stale);
     CHECK(session.state().items[2].emailId == "email-3");
     CHECK(session.state().items[3].emailId == "email-4");
-    CHECK_FALSE(session.canLoadMore());
 
-    materialization.complete(javelin::jmap::OperationError{
-        .message = QStringLiteral("Late continuation completion must be ignored."),
+    materialization.complete(javelin::app::MailboxWindowSummary{
+        .accountId = "account-1",
+        .mailboxId = "mailbox-1",
+        .offset = 2,
+        .limit = 2,
+        .position = 2,
+        .returnedLimit = 2,
+        .representativeCount = 2,
+        .total = 4,
+        .queryState = "state-2",
     });
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    waitFor([&] { return !session.state().loadMoreInFlight; });
     CHECK(session.state().loadMoreError.isEmpty());
     CHECK(session.state().items.size() == 4);
+    CHECK_FALSE(session.canLoadMore());
 }

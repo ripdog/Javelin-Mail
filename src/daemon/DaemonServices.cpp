@@ -526,15 +526,15 @@ namespace javelin::app
                 *m_contactCommandService, *m_contactCommandService);
         m_undoManager->setExecutor(QStringLiteral("address_book"),
                                    m_addressBookHistoryExecutor.get());
-        QObject::connect(
-            m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
-            m_mailQueryApplicationService.get(),
-            [this](QString accountId, QString mailboxId, const quint64 offset, const quint64 limit)
-            {
-                m_mailQueryApplicationService->publishMailboxWindowCommitted(
-                    std::move(accountId), std::move(mailboxId), static_cast<std::size_t>(offset),
-                    static_cast<std::size_t>(limit));
-            });
+        QObject::connect(m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
+                         m_mailQueryApplicationService.get(),
+                         [this](QString accountId, QString mailboxId, QString queryKey,
+                                const quint64 offset, const quint64 limit)
+                         {
+                             m_mailQueryApplicationService->publishMailboxWindowCommitted(
+                                 std::move(accountId), std::move(mailboxId), std::move(queryKey),
+                                 static_cast<std::size_t>(offset), static_cast<std::size_t>(limit));
+                         });
         QObject::connect(m_fullMailSyncService.get(), &FullMailSyncService::messageContentCommitted,
                          m_messageContentApplicationService.get(),
                          &MessageContentApplicationService::publishMessageContentCommitted);

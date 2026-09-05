@@ -1246,6 +1246,7 @@ namespace javelin::app
                 {
                     mailboxWindows.push_back({
                         .mailboxId = window.mailboxId,
+                        .queryKey = window.queryKey,
                         .offset = static_cast<std::uint64_t>(window.offset),
                         .limit = static_cast<std::uint64_t>(window.limit),
                         .total =
