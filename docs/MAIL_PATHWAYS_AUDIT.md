@@ -185,6 +185,100 @@ a crash between external acceptance and SQLite acknowledgement crosses two syste
 
 ## Implementation sequence and validation
 
+### Executor contract — implementation decisions
+
+Implement the six findings incrementally within the existing component boundaries. The
+following decisions resolve the design gaps; names, helper layout, and routine code mechanics
+are left to the executor. Do not introduce a generic event bus, replace the scheduler, or
+redesign notification eligibility. Reduced duplication is the aim, not a mandatory LoC target.
+
+**Committed effects (finding 1).** Make a normal delta step perform one bounded transition,
+returning its committed summary plus explicit remaining domain/rebaseline work. The application
+drives continuation and publishes each result before the next await. Keep rebaseline's existing
+atomic promotion rules: intermediate network batches are not committed account transitions.
+On supersession, retry unfinished demand, never erase previously published effects. Audit every
+commit followed by a fallible read or await in the affected paths, including the page
+materializer's post-commit summary read. Build response data before committing where practical;
+otherwise ensure a subsequent error cannot hide the commit. Publish committed facts using the
+captured account identity; run cancellation prevents further work, not publication of a commit
+that already happened. Removed-account teardown must not revive its runtime. Recovery continues
+to use durable SQLite state/outbox and the existing GUI reconnect barrier; no durable UI event
+log is needed.
+
+**Query admission (finding 2).** Use one daemon-side owner for mailbox/search query demand;
+extend the existing query application service or a helper it owns. The account coordinator
+submits canonical demand through a narrow port instead of directly owning a competing query
+execution path. Preserve the incremental canonical query algorithm and bounded page algorithm.
+Equivalent requests share execution and return a result to every live waiter. Equivalence
+includes account, query kind/key, offset, limit, anchor, and anchor offset. An explicit refresh
+cannot be satisfied by a cache hit or by a request dispatched before that refresh; merge such
+refreshes into one follow-up. Anchored and unanchored requests never share merely because their
+nominal offsets match. Closing a view detaches its waiter; retain existing search retirement
+rules so a late response cannot recreate retired windows. Other waiters/background demand live
+on independently. Foreground work promotes existing demand rather than adding another fetch.
+
+**Commit ordering (finding 2).** First add the delayed-page/newer-delta reproducer. Coalescing
+alone is insufficient: different queries share Email rows. Default to a conservative local
+per-account mail-cache revision, captured before network work and checked inside the write
+transaction, alongside the existing mutation fence. Advance it atomically whenever a commit
+can supersede fetched Email summaries or query membership, including delta, query, Thread,
+offline materialization, and relevant cleanup. Mutation generation still protects mutation
+admission/settlement; do not rename or reuse it as a network-refresh counter. Put revision
+handling in shared storage/consistency primitives, not scattered GUI/application bookkeeping.
+Do not count unrelated Contacts, content-only downloads, or notification acknowledgements.
+An invalid fence rejects the entire fetched commit as superseded and retains demand; it is
+neither a transport error nor successful current coverage. Prevent overlapping stale retries
+through query admission and yield between retries. Keep unrelated accounts independent. A
+narrower existing guard may be reused if production-path tests prove it covers these same
+writers; do not add a parallel revision mechanism unnecessarily. Never infer server-token order.
+
+**Scheduling (finding 3).** Preserve the existing 750 ms batching interval as a maximum wait
+from first pending push when no request/backoff blocks execution. Later pushes merge without
+postponing that deadline. Endpoint eligibility is a separate lower bound on dispatch; do not
+reset backoff for ordinary pushes. Preserve current explicit-user/network-recovery reset policy.
+After an active pass, process merged demand at the earliest eligible opportunity. Use monotonic
+time for deadlines. Test dispatch bounds rather than promising server completion within 750 ms.
+
+**IPC and GUI completion (finding 4).** Window identity is account + query kind/key + persisted
+offset/limit; mailbox identity remains available for broad membership invalidation. Carry the
+query key through every producer, merge operation, serializer, validator, and GUI adapter.
+Use the existing protocol compatibility/version mechanism for the changed wire contract; no
+old/new-shape fallback. The correlated request reply owns request completion and any actual
+anchored position. An exact-window invalidation schedules a cache read but does not cancel or
+complete the network request. Completion plus a current cache read settles visible loading;
+cache-hit completion must work without an invalidation. If an earlier read cannot be proven to
+cover the reply, reread SQLite. Errors preserve useful rows and end that request's loading.
+Share read coalescing/generation mechanics only where behavior is identical; no new session
+inheritance framework. Retain existing reconnect/scope invalidation and stale-view behavior.
+
+**Background dependencies (finding 5).** Extend the existing committed-change value with typed
+effect scopes sufficient for these consumers. Distinguish explicit account-wide scope from an
+empty affected set; bounded overflow widens scope rather than silently dropping affected IDs.
+Derive effects from actual before/after effective data, not the initiating operation's name:
+a query fetch that changes membership/blob data is not query-only. Offline catch-up consumes
+affected old/new mailbox membership and blob changes; raw-source availability wakes relevant
+hydration/index work; unread/count changes wake tray reads; queued vault projection work wakes
+maintenance. Unknown scope/rebaseline/startup conservatively uses account-wide recovery.
+Preserve the existing optimistic-projection exclusion for remote offline catch-up and existing
+pause/retry/complete-mirror rules. Notify the same consumers after settlement when required.
+UI domains remain derived presentation invalidations, not the scheduler's dependency API.
+
+**Notification ownership (finding 6).** Move local delivery/retry policy into
+`MailNotificationService`; inject the existing desktop delivery behavior through a narrow typed
+port at daemon composition. Preserve current grouping, activation routes, delivery success
+semantics, and retry intervals. Failed acknowledgement retries acknowledgement only; failed
+release retries release before making that claim deliverable again. Neither may trigger a
+duplicate delivery while locally unresolved. Baseline activation stays in account sync and
+must not be merged with delivery retries. Keep durable claim recovery and consumption tables;
+this change does not claim exactly-once desktop display across crashes. Move only implementation
+files needed for this ownership change; broad mechanical service splitting is optional.
+
+Each finding's regression cases above are acceptance criteria. A passing test must exercise the
+real commit/publication or IPC/session path, not just a new decision helper. Complete one stage,
+review for distant regressions, run the documented checks, and commit before proceeding. Do not
+leave both old and new execution paths active as a transitional fallback. If a suspected race
+is already prevented, record the evidence/test and omit the redundant mechanism.
+
 1. Add failure-ordering tests and fix committed-effect publication first.
 2. Bound debounce latency with deterministic scheduler/transport tests.
 3. Establish shared query admission and stale-response rules, covering actual SQLite commits.
