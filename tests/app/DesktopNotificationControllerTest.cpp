@@ -230,7 +230,8 @@ TEST_CASE("daemon background honors explicit offline catch-up scope on settlemen
     QSqlQuery mailbox{connection.database()};
     REQUIRE(mailbox.exec(QStringLiteral(
         "INSERT INTO mailboxes(account_id,mailbox_id,name,role,total_emails,total_threads,"
-        "is_subscribed) VALUES('account-1','archive','Archive','archive',1,1,1)")));
+        "is_subscribed) VALUES('account-1','archive','Archive','archive',1,1,1),"
+        "('account-1','inbox','Inbox','inbox',0,0,1)")));
     javelin::jmap::domain::Email email;
     email.id = "email-1";
     email.blobId = "blob-1";
@@ -251,39 +252,43 @@ TEST_CASE("daemon background honors explicit offline catch-up scope on settlemen
                      .tokenEndpoint = {},
                      .oauthClientId = {}},
         .accountId = "account-1",
-        .mailboxIds = {"archive"},
+        .mailboxIds = {"archive", "inbox"},
     }});
     QSqlQuery complete{connection.database()};
     REQUIRE(complete.exec(
         QStringLiteral("UPDATE offline_mailbox_scopes SET status='complete',generation=1,"
                        "completed_generation=1,query_state='query-state',email_state='email-state' "
-                       "WHERE account_id='account-1' AND mailbox_id='archive'")));
+                       "WHERE account_id='account-1'")));
     QSqlQuery clearMembership{connection.database()};
     REQUIRE(clearMembership.exec(
-        QStringLiteral("DELETE FROM offline_mailbox_membership WHERE account_id='account-1' AND "
-                       "mailbox_id='archive'")));
+        QStringLiteral("DELETE FROM offline_mailbox_membership WHERE account_id='account-1'")));
+    QSqlQuery staleSourceMembership{connection.database()};
+    REQUIRE(staleSourceMembership.exec(QStringLiteral(
+        "INSERT INTO "
+        "offline_mailbox_membership(account_id,mailbox_id,email_id,generation,position) "
+        "VALUES('account-1','inbox','email-1',1,0)")));
 
     auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
         std::make_unique<FakeNotificationTransport>(), false, true);
     javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
     background.start(false);
 
-    javelin::app::MailCacheChange change{
-        .accountId = QStringLiteral("account-1"),
-        .mailboxIds = {},
-        .queryWindows = {},
-        .searchWindows = {},
-        .optimisticProjection = true,
-    };
-    change.background.offlineCatchUp.addMailbox(QStringLiteral("archive"));
-    services.mailMutationApplicationService().cacheCommitted(std::move(change));
+    services.fullMailSyncService().mailCommitEffectsCommitted(
+        QStringLiteral("account-1"), javelin::jmap::sync::MailCommitEffects{
+                                         .emailObjectsChanged = false,
+                                         .mailboxMembershipChanged = true,
+                                         .sourceIdentityChanged = false,
+                                         .affectedMailboxIds = {"archive", "inbox"},
+                                     });
 
     QSqlQuery membership{connection.database()};
     REQUIRE(membership.exec(QStringLiteral(
-        "SELECT COUNT(*) FROM offline_mailbox_membership WHERE account_id='account-1' AND "
-        "mailbox_id='archive' AND email_id='email-1'")));
+        "SELECT mailbox_id,COUNT(*) FROM offline_mailbox_membership WHERE "
+        "account_id='account-1' AND email_id='email-1' GROUP BY mailbox_id ORDER BY mailbox_id")));
     REQUIRE(membership.next());
-    CHECK(membership.value(0).toInt() == 1);
+    CHECK(membership.value(0).toString() == QStringLiteral("archive"));
+    CHECK(membership.value(1).toInt() == 1);
+    CHECK_FALSE(membership.next());
 }
 
 TEST_CASE("mail notification activation preserves the message route and mailbox name",

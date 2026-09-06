@@ -3,6 +3,7 @@
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include "app/AccountConnectionSettings.h"
+#include "jmap/sync/MailCommitEffects.h"
 
 #include <QCoroTask>
 #include <QObject>
@@ -56,6 +57,8 @@ namespace javelin::app
       Q_SIGNALS:
         void mailboxWindowCommitted(QString accountId, QString mailboxId, QString queryKey,
                                     quint64 offset, quint64 limit);
+        void mailCommitEffectsCommitted(QString accountId,
+                                        javelin::jmap::sync::MailCommitEffects effects);
         void messageContentCommitted(QString accountId, QString emailId);
 
       private:

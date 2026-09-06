@@ -114,6 +114,9 @@ namespace javelin::app
         void publishCacheChange(MailCacheChange change) override;
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, QString queryKey,
                                            std::size_t offset, std::size_t limit);
+        void
+        publishMailCommitEffectsCommitted(QString accountId,
+                                          const javelin::jmap::sync::MailCommitEffects& effects);
         void publishThreadMaterializationCommitted(QString accountId, const QStringList& threadIds,
                                                    MailBackgroundEffects background = {});
         void

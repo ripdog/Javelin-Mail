@@ -94,6 +94,7 @@ namespace javelin::app
             bool superseded = false;
             std::vector<std::size_t> windowOffsets;
             std::size_t representativeCount = 0;
+            javelin::jmap::sync::MailCommitEffects effects;
         };
 
         [[nodiscard]] FullMailboxPageCommit commitFullMailboxPage(
@@ -176,11 +177,19 @@ namespace javelin::app
             if (const auto error = emailsRepository.upsertMany(emailTransaction.cacheTransaction(),
                                                                accountId, emails))
                 return FullMailboxPageCommit{error->message};
+            javelin::jmap::sync::MailCommitEffects reconciliationEffects;
             if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
-                    emailTransaction, connection, accountId, emailIds, emailState))
+                    emailTransaction, connection, accountId, emailIds, emailState,
+                    &reconciliationEffects))
                 return FullMailboxPageCommit{error->message};
             if (const auto error = emailTransaction.commit())
                 return FullMailboxPageCommit{error->message};
+
+            const auto withCommittedEffects = [&reconciliationEffects](FullMailboxPageCommit result)
+            {
+                result.effects = reconciliationEffects;
+                return result;
+            };
 
             const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
                 .mailboxId = mailboxId,
@@ -194,7 +203,7 @@ namespace javelin::app
                     connection, QStringLiteral("Commit full mailbox page"));
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
-                    return FullMailboxPageCommit{error->message};
+                    return withCommittedEffects(FullMailboxPageCommit{error->message});
                 auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
                     std::move(transactionResult));
                 QSqlQuery insert{database};
@@ -217,7 +226,7 @@ namespace javelin::app
                     {
                         const QString error = insert.lastError().text();
                         transaction.rollback();
-                        return FullMailboxPageCommit{error};
+                        return withCommittedEffects(FullMailboxPageCommit{error});
                     }
                 }
                 const auto completed = position + emailIds.size();
@@ -253,7 +262,7 @@ namespace javelin::app
                 {
                     const QString error = saveProgress.lastError().text();
                     transaction.rollback();
-                    return FullMailboxPageCommit{error};
+                    return withCommittedEffects(FullMailboxPageCommit{error});
                 }
                 QSqlQuery saveJob{database};
                 saveJob.prepare(QStringLiteral(
@@ -271,10 +280,10 @@ namespace javelin::app
                 {
                     const QString error = saveJob.lastError().text();
                     transaction.rollback();
-                    return FullMailboxPageCommit{error};
+                    return withCommittedEffects(FullMailboxPageCommit{error});
                 }
                 if (const auto error = transaction.commit())
-                    return FullMailboxPageCommit{error->message};
+                    return withCommittedEffects(FullMailboxPageCommit{error->message});
             }
 
             javelin::jmap::cache::MailboxMessageReadRepository queries{connection};
@@ -283,10 +292,10 @@ namespace javelin::app
                 std::get_if<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
                     &coverageResult);
             if (coverage == nullptr)
-                return FullMailboxPageCommit{
-                    std::get<javelin::jmap::cache::DatabaseError>(coverageResult).message};
+                return withCommittedEffects(FullMailboxPageCommit{
+                    std::get<javelin::jmap::cache::DatabaseError>(coverageResult).message});
             if (!coverage->has_value() || (*coverage)->representativeCount == 0)
-                return {};
+                return withCommittedEffects({});
 
             QSqlQuery canonicalState{database};
             canonicalState.prepare(
@@ -296,11 +305,13 @@ namespace javelin::app
             canonicalState.bindValue(QStringLiteral(":query_key"),
                                      QString::fromStdString(queryKey));
             if (!canonicalState.exec())
-                return FullMailboxPageCommit{canonicalState.lastError().text()};
+                return withCommittedEffects(
+                    FullMailboxPageCommit{canonicalState.lastError().text()});
             if (!canonicalState.next() || canonicalState.value(0).toString().isEmpty())
             {
                 canonicalState.finish();
-                return FullMailboxPageCommit{(*coverage)->representativeCount};
+                return withCommittedEffects(
+                    FullMailboxPageCommit{(*coverage)->representativeCount});
             }
             const std::string progressiveState = canonicalState.value(0).toString().toStdString();
             canonicalState.finish();
@@ -316,7 +327,7 @@ namespace javelin::app
             lastWindow.bindValue(QStringLiteral(":query_state"),
                                  QString::fromStdString(progressiveState));
             if (!lastWindow.exec())
-                return FullMailboxPageCommit{lastWindow.lastError().text()};
+                return withCommittedEffects(FullMailboxPageCommit{lastWindow.lastError().text()});
             if (lastWindow.next() && !lastWindow.value(0).isNull())
                 firstOffset = lastWindow.value(0).toULongLong();
             lastWindow.finish();
@@ -327,8 +338,8 @@ namespace javelin::app
                 firstOffset);
             const auto* items = std::get_if<std::vector<std::string>>(&itemsResult);
             if (items == nullptr)
-                return FullMailboxPageCommit{
-                    std::get<javelin::jmap::cache::DatabaseError>(itemsResult).message};
+                return withCommittedEffects(FullMailboxPageCommit{
+                    std::get<javelin::jmap::cache::DatabaseError>(itemsResult).message});
 
             javelin::jmap::cache::MailboxWindowRepository windows{connection};
             FullMailboxPageCommit result{(*coverage)->representativeCount};
@@ -356,10 +367,10 @@ namespace javelin::app
                         .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                         .emailIds = std::move(representativeIds),
                     }))
-                    return FullMailboxPageCommit{error->message};
+                    return withCommittedEffects(FullMailboxPageCommit{error->message});
                 result.windowOffsets.push_back(offset);
             }
-            return result;
+            return withCommittedEffects(std::move(result));
         }
 
         [[nodiscard]] std::size_t
@@ -1271,6 +1282,13 @@ namespace javelin::app
                 const auto commit = co_await qCoro(commitFuture).takeResult();
                 if (!self)
                     co_return;
+                if (commit.effects.emailObjectsChanged || commit.effects.mailboxMembershipChanged ||
+                    commit.effects.sourceIdentityChanged ||
+                    !commit.effects.affectedMailboxIds.empty())
+                {
+                    Q_EMIT mailCommitEffectsCommitted(QString::fromStdString(scope.accountId),
+                                                      commit.effects);
+                }
                 if (commit.superseded)
                 {
                     continue;

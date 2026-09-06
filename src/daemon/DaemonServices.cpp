@@ -544,6 +544,14 @@ namespace javelin::app
                                  std::move(accountId), std::move(mailboxId), std::move(queryKey),
                                  static_cast<std::size_t>(offset), static_cast<std::size_t>(limit));
                          });
+        QObject::connect(
+            m_fullMailSyncService.get(), &FullMailSyncService::mailCommitEffectsCommitted,
+            m_mailQueryApplicationService.get(),
+            [this](QString accountId, const javelin::jmap::sync::MailCommitEffects& effects)
+            {
+                m_mailQueryApplicationService->publishMailCommitEffectsCommitted(
+                    std::move(accountId), effects);
+            });
         QObject::connect(m_fullMailSyncService.get(), &FullMailSyncService::messageContentCommitted,
                          m_messageContentApplicationService.get(),
                          &MessageContentApplicationService::publishMessageContentCommitted);

@@ -1669,6 +1669,20 @@ namespace javelin::app
         });
     }
 
+    void MailQueryApplicationService::publishMailCommitEffectsCommitted(
+        QString accountId, const javelin::jmap::sync::MailCommitEffects& effects)
+    {
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = std::move(accountId),
+            .mailboxIds = {},
+            .queryWindows = {},
+            .searchWindows = {},
+            .mailboxTreeChanged = false,
+            .emailObjectsChanged = effects.emailObjectsChanged,
+            .background = backgroundEffects(effects),
+        });
+    }
+
     void MessageContentApplicationService::publishMessageContentCommitted(QString accountId,
                                                                           QString emailId)
     {

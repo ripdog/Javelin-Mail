@@ -19,6 +19,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sync/MailCommitEffects.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -381,6 +382,33 @@ TEST_CASE("mail query materialization publishes only semantic background depende
     CHECK_FALSE(secondChange.queryWindows.empty());
     CHECK(secondChange.background.offlineCatchUp.empty());
     CHECK_FALSE(secondChange.background.vaultProjectionWorkQueued);
+}
+
+TEST_CASE("mail query publishes reconciliation effects as targeted offline catch-up",
+          "[app][mail-query][background-effects][reconciliation]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+
+    std::optional<javelin::app::MailCacheChange> published;
+    QObject::connect(&fixture.service, &javelin::app::MailQueryApplicationService::cacheCommitted,
+                     &fixture.service, [&published](javelin::app::MailCacheChange change)
+                     { published = std::move(change); });
+
+    fixture.service.publishMailCommitEffectsCommitted(
+        QStringLiteral("account-1"), javelin::jmap::sync::MailCommitEffects{
+                                         .emailObjectsChanged = false,
+                                         .mailboxMembershipChanged = true,
+                                         .sourceIdentityChanged = false,
+                                         .affectedMailboxIds = {"inbox", "archive"},
+                                     });
+
+    REQUIRE(published.has_value());
+    CHECK_FALSE(published->background.offlineCatchUp.accountWide);
+    CHECK(published->background.offlineCatchUp.mailboxIds ==
+          QStringList{QStringLiteral("inbox"), QStringLiteral("archive")});
+    CHECK(published->background.vaultProjectionWorkQueued);
 }
 
 TEST_CASE("mail query admission shares equivalent in-flight mailbox pages",
