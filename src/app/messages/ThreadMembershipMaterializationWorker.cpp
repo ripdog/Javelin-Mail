@@ -431,6 +431,18 @@ namespace javelin::app
                     !response.notFound.empty() ||
                     std::ranges::any_of(response.list, [&threadId](const auto& email)
                                         { return email.threadId != threadId; });
+                javelin::jmap::sync::MailCommitEffects effects;
+                for (const auto& email : response.list)
+                {
+                    const auto previousResult = emails.find(target.accountId, email.id);
+                    if (const auto* databaseError =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&previousResult))
+                        co_return javelin::jmap::operationError(*databaseError);
+                    javelin::jmap::sync::accumulateMailCommitEffects(
+                        effects,
+                        std::get<std::optional<javelin::jmap::domain::Email>>(previousResult),
+                        email);
+                }
                 auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
                     m_databaseConnection,
                     QStringLiteral("Commit Thread child Email materialization"));
@@ -477,7 +489,7 @@ namespace javelin::app
                 if (!committedEmailIds.empty())
                     Q_EMIT childEmailsCommitted(QString::fromStdString(target.accountId),
                                                 qStringIds(affectedThreadIds),
-                                                qStringIds(committedEmailIds));
+                                                qStringIds(committedEmailIds), std::move(effects));
                 if (!membershipRace)
                     continue;
                 if (reconciliationCount >= maximumMembershipReconciliations)

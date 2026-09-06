@@ -3,9 +3,6 @@
 #include "protocol/ActivationContract.h"
 
 #include <QObject>
-#include <QSet>
-#include <QTimer>
-
 #include <memory>
 #include <optional>
 #include <string>
@@ -43,9 +40,7 @@ namespace javelin::app
 
       private:
         void setupNetworkReachability();
-        void retryMailNotifications();
         void refreshTrayUnreadCount();
-        void queueNotificationRetry(const QString& accountId);
         void submitNotificationMutations(std::string accountId,
                                          std::optional<std::string> operationGroupId,
                                          QString failureTitle);
@@ -53,8 +48,6 @@ namespace javelin::app
         DaemonServices& m_services;
         std::unique_ptr<DesktopNotificationController> m_notifications;
         std::unique_ptr<DaemonTrayController> m_tray;
-        QTimer m_notificationRetryTimer;
-        QSet<QString> m_notificationRetryAccounts;
         bool m_started = false;
     };
 } // namespace javelin::app

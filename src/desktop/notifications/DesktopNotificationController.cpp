@@ -205,6 +205,13 @@ namespace javelin::app
         return true;
     }
 
+    bool DesktopNotificationController::deliverNewMail(const MailNotificationDelivery& notification)
+    {
+        return notifyNewMail(notification.accountId, notification.mailboxId, notification.threadId,
+                             notification.emailId, notification.mailboxName, notification.title,
+                             notification.message);
+    }
+
     void DesktopNotificationController::notifyError(const QString& connectionId,
                                                     const QString& title, const QString& message,
                                                     const bool persistent, const bool opensSettings)

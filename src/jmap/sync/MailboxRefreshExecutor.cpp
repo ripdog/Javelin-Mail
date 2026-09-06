@@ -818,6 +818,22 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
         std::vector<std::string> removedEmailIds;
+        MailCommitEffects effects;
+        const auto accumulateEffects = [&emailRepository, &accountId, &effects](
+                                           const auto& emails) -> std::optional<OperationError>
+        {
+            for (const auto& email : emails)
+            {
+                const auto previousResult = emailRepository.find(accountId, email.id);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&previousResult))
+                    return javelin::jmap::operationError(*error);
+                accumulateMailCommitEffects(
+                    effects, std::get<std::optional<javelin::jmap::domain::Email>>(previousResult),
+                    email);
+            }
+            return std::nullopt;
+        };
 
         if (!requireFullMaterialization &&
             queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
@@ -851,6 +867,8 @@ namespace javelin::jmap::sync
             changedEmailIds = incremental.changedEmailIds;
             insertedEmailIds = incremental.insertedEmailIds;
             removedEmailIds = incremental.removedEmailIds;
+            if (const auto error = accumulateEffects(incremental.updatedEmails))
+                co_return *error;
             const auto affectedMailboxIdsResult =
                 changedMailboxIds(m_databaseConnection, accountId, incremental.updatedEmails);
             if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
@@ -983,6 +1001,8 @@ namespace javelin::jmap::sync
                     insertedEmailIds = deduplicatedIds(std::move(insertedRepresentatives));
                 }
             }
+            if (const auto error = accumulateEffects(fetch.emails))
+                co_return *error;
             const auto affectedMailboxIdsResult =
                 changedMailboxIds(m_databaseConnection, accountId, fetch.emails);
             if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
@@ -1068,6 +1088,7 @@ namespace javelin::jmap::sync
             .changedEmailIds = std::move(changedEmailIds),
             .insertedEmailIds = std::move(insertedEmailIds),
             .removedEmailIds = std::move(removedEmailIds),
+            .effects = std::move(effects),
         };
     }
 

@@ -48,6 +48,25 @@ namespace javelin::app
             WorkScheduler& m_scheduler;
         };
 
+        [[nodiscard]] MailBackgroundEffects
+        backgroundEffects(const javelin::jmap::sync::MailDeltaRefreshSummary& summary)
+        {
+            MailBackgroundEffects background;
+            if (summary.backgroundRecoveryAccountWide)
+            {
+                background.offlineCatchUp.accountWide = true;
+            }
+            else if (summary.effects.mailboxMembershipChanged ||
+                     summary.effects.sourceIdentityChanged)
+            {
+                for (const auto& mailboxId : summary.effects.affectedMailboxIds)
+                    background.offlineCatchUp.addMailbox(QString::fromStdString(mailboxId));
+            }
+            background.mailboxCountsChanged = summary.mailboxChanged;
+            background.vaultProjectionWorkQueued = summary.effects.mailboxMembershipChanged;
+            return background;
+        }
+
         [[nodiscard]] AccountSyncCoordinator::Status
         toServiceStatus(const javelin::jmap::sync::StateChangeConnectionStatus status)
         {
@@ -584,7 +603,8 @@ namespace javelin::app
                 .queryWindows = {},
                 .searchWindows = {},
                 .mailboxTreeChanged = delta.mailboxChanged,
-                .emailObjectsChanged = delta.emailChanged,
+                .emailObjectsChanged = delta.effects.emailObjectsChanged,
+                .background = backgroundEffects(delta),
             });
         };
 
@@ -740,6 +760,7 @@ namespace javelin::app
                         .searchWindows = {},
                         .mailboxTreeChanged = true,
                         .emailObjectsChanged = false,
+                        .background = {.mailboxCountsChanged = true},
                     });
                     if (m_runContext != nullptr &&
                         m_runContext->generation == runContext->generation &&

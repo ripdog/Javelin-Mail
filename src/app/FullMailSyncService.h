@@ -50,6 +50,7 @@ namespace javelin::app
         void applySettings(std::vector<FullSyncAccountConfiguration> configurations);
         void refreshMailboxVisibility(std::string_view accountId);
         void requestCatchUp(std::string_view accountId);
+        void requestCatchUp(std::string_view accountId, std::vector<std::string> mailboxIds);
         void requestMailboxResync(std::string_view accountId, std::string_view mailboxId);
 
       Q_SIGNALS:
@@ -65,6 +66,13 @@ namespace javelin::app
             std::string jobId;
         };
 
+        struct CatchUpDemand
+        {
+            bool accountWide = false;
+            std::unordered_set<std::string> mailboxIds{};
+        };
+
+        void requestCatchUpImpl(std::string accountId, CatchUpDemand demand);
         void schedulePump();
         void pump();
         [[nodiscard]] QCoro::Task<void> run(Scope scope);
@@ -84,7 +92,7 @@ namespace javelin::app
         std::unordered_map<std::string, AccountConnectionSettings> m_settings;
         std::unordered_map<std::string, Scope> m_scopes;
         std::unordered_set<std::string> m_runningAccounts;
-        std::unordered_set<std::string> m_dirtyAccounts;
+        std::unordered_map<std::string, CatchUpDemand> m_pendingCatchUps;
         bool m_pumpScheduled = false;
     };
 } // namespace javelin::app

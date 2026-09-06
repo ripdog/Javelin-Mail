@@ -12,6 +12,8 @@ namespace javelin::jmap::domain
     {
         std::optional<std::string> name;
         std::string email;
+
+        friend bool operator==(const EmailAddress&, const EmailAddress&) = default;
     };
 
     struct MailboxRights
@@ -69,6 +71,8 @@ namespace javelin::jmap::domain
         std::vector<EmailAddress> bcc;
         std::vector<EmailAddress> replyTo;
         std::optional<std::string> preview;
+
+        friend bool operator==(const Email&, const Email&) = default;
     };
 
     struct Identity

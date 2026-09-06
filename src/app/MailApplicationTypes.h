@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace javelin::app
@@ -31,6 +32,54 @@ namespace javelin::app
         std::optional<std::size_t> total;
     };
 
+    struct MailDependencyScope
+    {
+        static constexpr std::size_t maximumMailboxIds = 64;
+
+        bool accountWide = false;
+        QStringList mailboxIds{};
+
+        [[nodiscard]] bool empty() const
+        {
+            return !accountWide && mailboxIds.isEmpty();
+        }
+
+        void addMailbox(QString mailboxId)
+        {
+            if (accountWide || mailboxId.isEmpty() || mailboxIds.contains(mailboxId))
+                return;
+            if (static_cast<std::size_t>(mailboxIds.size()) >= maximumMailboxIds)
+            {
+                accountWide = true;
+                mailboxIds.clear();
+                return;
+            }
+            mailboxIds.push_back(std::move(mailboxId));
+        }
+
+        void merge(const MailDependencyScope& other)
+        {
+            if (accountWide)
+                return;
+            if (other.accountWide)
+            {
+                accountWide = true;
+                mailboxIds.clear();
+                return;
+            }
+            for (const auto& mailboxId : other.mailboxIds)
+                addMailbox(mailboxId);
+        }
+    };
+
+    struct MailBackgroundEffects
+    {
+        MailDependencyScope offlineCatchUp{};
+        bool rawSourceAvailabilityChanged = false;
+        bool mailboxCountsChanged = false;
+        bool vaultProjectionWorkQueued = false;
+    };
+
     struct MailCacheChange
     {
         QString accountId;
@@ -47,6 +96,7 @@ namespace javelin::app
         bool mailTagsChanged = false;
         bool contactsChanged = false;
         bool identitiesChanged = false;
+        MailBackgroundEffects background{};
     };
 
     struct MailCacheInvalidation

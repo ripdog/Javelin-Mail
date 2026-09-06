@@ -608,6 +608,9 @@ namespace javelin::jmap::sync
                 destination.notificationBaselineEstablished ||
                 source.notificationBaselineEstablished;
             destination.superseded = destination.superseded || source.superseded;
+            destination.backgroundRecoveryAccountWide =
+                destination.backgroundRecoveryAccountWide || source.backgroundRecoveryAccountWide;
+            mergeMailCommitEffects(destination.effects, source.effects);
             appendUnique(destination.changedMailboxIds, source.changedMailboxIds);
             appendUnique(destination.queryAffectedMailboxIds, source.queryAffectedMailboxIds);
             appendUnique(destination.insertedEmailIds, source.insertedEmailIds);
@@ -688,6 +691,7 @@ namespace javelin::jmap::sync
                     co_return operationError(*error);
                 const auto& previous =
                     std::get<std::optional<javelin::jmap::domain::Email>>(previousResult);
+                accumulateMailCommitEffects(summary.effects, previous, email);
                 appendUnique(summary.changedMailboxIds, email.mailboxIds);
                 if (previous.has_value())
                     appendUnique(summary.changedMailboxIds, previous->mailboxIds);
@@ -802,6 +806,7 @@ namespace javelin::jmap::sync
                     co_return operationError(*error);
                 const auto& previous =
                     std::get<std::optional<javelin::jmap::domain::Email>>(previousResult);
+                accumulateMailRemovalEffects(summary.effects, previous);
                 if (previous.has_value())
                 {
                     appendUnique(summary.changedMailboxIds, previous->mailboxIds);
@@ -903,6 +908,7 @@ namespace javelin::jmap::sync
             if (const auto error = transaction.commit())
                 co_return operationError(*error);
 
+            summary.backgroundRecoveryAccountWide = true;
             co_return summary;
         }
 
@@ -1197,6 +1203,7 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             const auto& previous =
                 std::get<std::optional<javelin::jmap::domain::Email>>(previousResult);
+            accumulateMailCommitEffects(summary.effects, previous, email);
             appendUnique(summary.changedMailboxIds, email.mailboxIds);
             if (previous.has_value())
                 appendUnique(summary.changedMailboxIds, previous->mailboxIds);
@@ -1305,6 +1312,7 @@ namespace javelin::jmap::sync
                     co_return operationError(*error);
                 const auto& previous =
                     std::get<std::optional<javelin::jmap::domain::Email>>(previousResult);
+                accumulateMailRemovalEffects(summary.effects, previous);
                 if (!previous.has_value())
                     continue;
                 appendUnique(summary.changedMailboxIds, previous->mailboxIds);

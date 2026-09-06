@@ -2,6 +2,7 @@
 
 #include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
+#include "jmap/sync/MailCommitEffects.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
@@ -36,6 +37,8 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedMailboxIds;
         std::vector<std::string> queryAffectedMailboxIds;
         std::vector<std::string> insertedEmailIds;
+        MailCommitEffects effects;
+        bool backgroundRecoveryAccountWide = false;
         // A normal refresh call performs at most one committed delta page. Remaining pagination is
         // explicit demand for the application coordinator so it can publish this page before the
         // next network await.

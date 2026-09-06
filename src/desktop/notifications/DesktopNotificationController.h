@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/MailNotificationDeliveryPort.h"
+
 #include <QObject>
 
 #include <QByteArray>
@@ -38,7 +40,7 @@ namespace javelin::app
         virtual void close(uint notificationId) = 0;
     };
 
-    class DesktopNotificationController final : public QObject
+    class DesktopNotificationController final : public QObject, public MailNotificationDeliveryPort
     {
         Q_OBJECT
 
@@ -55,6 +57,7 @@ namespace javelin::app
                                          const QString& threadId, const QString& emailId,
                                          const QString& mailboxName, const QString& title,
                                          const QString& message);
+        [[nodiscard]] bool deliverNewMail(const MailNotificationDelivery& notification) override;
         void notifyError(const QString& connectionId, const QString& title, const QString& message,
                          bool persistent, bool opensSettings);
         [[nodiscard]] bool notifyCalendarEvent(const QString& key, const QString& title,

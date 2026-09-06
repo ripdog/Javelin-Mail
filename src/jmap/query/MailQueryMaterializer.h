@@ -5,6 +5,7 @@
 #include "jmap/cache/MessageListReadTypes.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
+#include "jmap/sync/MailCommitEffects.h"
 
 #include <QCoroTask>
 
@@ -41,6 +42,7 @@ namespace javelin::jmap
         std::optional<std::size_t> total;
         std::string queryState;
         std::vector<javelin::jmap::cache::MessageListItem> results;
+        javelin::jmap::sync::MailCommitEffects effects;
     };
 
     struct MailQueryMaterializationSuperseded
@@ -62,6 +64,7 @@ namespace javelin::jmap
         std::optional<std::size_t> total;
         std::string queryState;
         std::vector<javelin::jmap::cache::MessageListItem> results;
+        javelin::jmap::sync::MailCommitEffects effects;
     };
 
     using MailboxPageResult =

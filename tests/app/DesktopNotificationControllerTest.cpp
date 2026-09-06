@@ -5,6 +5,7 @@
 #include "app/DeferredSendService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
+#include "app/MessageContentApplicationService.h"
 #include "daemon/DaemonBackgroundController.h"
 #include "daemon/DaemonServices.h"
 #include "jmap/cache/EmailRepository.h"
@@ -311,6 +312,42 @@ TEST_CASE("daemon delivers pending new mail while no GUI is running",
     CHECK(rowCount(services, QStringLiteral("notification_dispatch_claims")) == 0);
 }
 
+TEST_CASE("raw message availability queues search indexing through daemon background dependencies",
+          "[app][daemon][background][mail-index]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto location = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(location));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(location))};
+    QSqlQuery account{services.databaseConnection().database()};
+    REQUIRE(account.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','https://example.test/jmap',1,1)")));
+
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
+        std::move(transport), false, true);
+    javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
+    background.start(false);
+
+    services.messageContentApplicationService().publishMessageContentCommitted(
+        QStringLiteral("account-1"), QStringLiteral("email-1"));
+
+    QSqlQuery jobs{services.databaseConnection().database()};
+    REQUIRE(jobs.exec(
+        QStringLiteral("SELECT COUNT(*) FROM background_jobs WHERE account_id='account-1' AND "
+                       "kind='search_index'")));
+    REQUIRE(jobs.next());
+    CHECK(jobs.value(0).toInt() == 1);
+}
+
 TEST_CASE("failed daemon desktop delivery retries from local notification state without sync",
           "[app][daemon][notification][background][retry][gui-closed]")
 {
@@ -333,6 +370,7 @@ TEST_CASE("failed daemon desktop delivery retries from local notification state 
     observer->sendError = QStringLiteral("desktop notification unavailable");
     auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
         std::move(transport), false, true);
+    auto* notificationController = notifications.get();
     javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
     background.start(false);
 
@@ -341,12 +379,14 @@ TEST_CASE("failed daemon desktop delivery retries from local notification state 
     CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 1);
     CHECK(rowCount(services, QStringLiteral("notification_dispatch_claims")) == 0);
 
-    // This is the same local retry body invoked by the background retry timer. No account runtime
-    // exists in this process, so successful retryability cannot be supplied by JMAP
-    // synchronization.
-    services.mailNotificationService().accountChanged(QStringLiteral("account-1"));
+    // Reattaching the same delivery port makes an already queued service-owned retry immediately
+    // eligible, without relying on account synchronization or controller-owned retry state.
+    observer->sendError.reset();
+    services.mailNotificationService().setDeliveryPort(nullptr);
+    services.mailNotificationService().setDeliveryPort(notificationController);
+    QCoreApplication::processEvents(QEventLoop::AllEvents);
     CHECK(observer->sendCount == 2);
-    CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 1);
+    CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 0);
     CHECK(rowCount(services, QStringLiteral("notification_dispatch_claims")) == 0);
     CHECK(services.accountRuntimeManager().configuredAccountIds().empty());
 }

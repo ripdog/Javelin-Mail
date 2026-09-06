@@ -27,6 +27,10 @@ namespace javelin::jmap::api
 {
     class JmapMethodTransport;
 }
+namespace javelin::jmap::sync
+{
+    struct MailCommitEffects;
+}
 
 namespace javelin::jmap::cache
 {
@@ -110,7 +114,11 @@ namespace javelin::app
         void publishCacheChange(MailCacheChange change) override;
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, QString queryKey,
                                            std::size_t offset, std::size_t limit);
-        void publishThreadMaterializationCommitted(QString accountId, const QStringList& threadIds);
+        void publishThreadMaterializationCommitted(QString accountId, const QStringList& threadIds,
+                                                   MailBackgroundEffects background = {});
+        void
+        publishThreadChildEmailsCommitted(QString accountId, const QStringList& threadIds,
+                                          const javelin::jmap::sync::MailCommitEffects& effects);
 
       Q_SIGNALS:
         void cacheCommitted(javelin::app::MailCacheChange change);

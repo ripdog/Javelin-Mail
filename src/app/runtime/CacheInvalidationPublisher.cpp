@@ -115,6 +115,14 @@ namespace javelin::app
         target.mailTagsChanged = target.mailTagsChanged || source.mailTagsChanged;
         target.contactsChanged = target.contactsChanged || source.contactsChanged;
         target.identitiesChanged = target.identitiesChanged || source.identitiesChanged;
+        target.background.offlineCatchUp.merge(source.background.offlineCatchUp);
+        target.background.rawSourceAvailabilityChanged =
+            target.background.rawSourceAvailabilityChanged ||
+            source.background.rawSourceAvailabilityChanged;
+        target.background.mailboxCountsChanged =
+            target.background.mailboxCountsChanged || source.background.mailboxCountsChanged;
+        target.background.vaultProjectionWorkQueued = target.background.vaultProjectionWorkQueued ||
+                                                      source.background.vaultProjectionWorkQueued;
     }
 
     std::vector<javelin::protocol::ChangedDomain>

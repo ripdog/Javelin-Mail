@@ -255,6 +255,56 @@ namespace javelin::app
             return mailboxIds;
         }
 
+        [[nodiscard]] QStringList membershipMailboxIdsForPendingMutations(
+            javelin::jmap::cache::DatabaseConnection& connection, const std::string_view accountId,
+            const std::optional<std::string>& operationGroupId, const std::size_t limit)
+        {
+            javelin::jmap::sync::EmailMutationJournal journal{connection};
+            auto recordsResult =
+                operationGroupId.has_value()
+                    ? journal.listPendingForOperationGroup(accountId, *operationGroupId, limit)
+                    : journal.listByStatus(accountId, javelin::jmap::sync::MutationStatus::Pending,
+                                           limit);
+            const auto* records =
+                std::get_if<std::vector<javelin::jmap::sync::EmailMutationRecord>>(&recordsResult);
+            if (records == nullptr)
+                return {};
+
+            QStringList mailboxIds;
+            const auto append = [&mailboxIds](const auto& values)
+            {
+                for (const auto& value : values)
+                {
+                    const auto mailboxId = QString::fromStdString(value);
+                    if (!mailboxIds.contains(mailboxId))
+                        mailboxIds.push_back(mailboxId);
+                }
+            };
+            for (const auto& record : *records)
+            {
+                if (!record.patch.destroy && record.patch.addMailboxIds.empty() &&
+                    record.patch.removeMailboxIds.empty())
+                {
+                    continue;
+                }
+                append(record.patch.addMailboxIds);
+                append(record.patch.removeMailboxIds);
+                if (record.baseMailboxIds.has_value())
+                    append(*record.baseMailboxIds);
+            }
+            return mailboxIds;
+        }
+
+        [[nodiscard]] MailBackgroundEffects
+        mailboxMembershipBackgroundEffects(const QStringList& mailboxIds)
+        {
+            MailBackgroundEffects background;
+            for (const auto& mailboxId : mailboxIds)
+                background.offlineCatchUp.addMailbox(mailboxId);
+            background.vaultProjectionWorkQueued = !background.offlineCatchUp.empty();
+            return background;
+        }
+
         class ForegroundWorkScope final
         {
           public:
@@ -286,7 +336,6 @@ namespace javelin::app
 
         constexpr auto contactRefreshRetryDelay = std::chrono::seconds{30};
         constexpr unsigned int notificationBaselineRetryMaximumExponent = 5;
-        constexpr unsigned int mailNotificationLocalRetryMaximumExponent = 5;
 
         [[nodiscard]] javelin::app::undo::ExactMailPatch
         historyPatch(const javelin::jmap::EmailMailboxMutation& mutation)
@@ -471,6 +520,24 @@ namespace javelin::app
                                    .isAscending = false,
                                    .collapseThreads = true,
                                });
+        }
+
+        [[nodiscard]] MailBackgroundEffects
+        backgroundEffects(const javelin::jmap::sync::MailCommitEffects& effects,
+                          const bool accountWideRecovery = false)
+        {
+            MailBackgroundEffects background;
+            if (accountWideRecovery)
+            {
+                background.offlineCatchUp.accountWide = true;
+            }
+            else if (effects.mailboxMembershipChanged || effects.sourceIdentityChanged)
+            {
+                for (const auto& mailboxId : effects.affectedMailboxIds)
+                    background.offlineCatchUp.addMailbox(QString::fromStdString(mailboxId));
+            }
+            background.vaultProjectionWorkQueued = effects.mailboxMembershipChanged;
+            return background;
         }
 
         [[nodiscard]] QCoro::Task<void> yieldMailQueryRetry()
@@ -782,15 +849,6 @@ namespace javelin::app
         ThreadMaterializationCoordinator* threadMaterializationCoordinator)
     {
         m_threadMaterializationCoordinator = threadMaterializationCoordinator;
-    }
-
-    MailNotificationService::MailNotificationService(
-        javelin::jmap::cache::DatabaseConnection& databaseConnection, QObject* parent)
-        : QObject(parent), m_databaseConnection(databaseConnection)
-    {
-        m_localRetryTimer.setSingleShot(true);
-        connect(&m_localRetryTimer, &QTimer::timeout, this,
-                &MailNotificationService::retryLocalFailures);
     }
 
     ContactApplicationService::ContactApplicationService(
@@ -1366,6 +1424,7 @@ namespace javelin::app
             .mailboxTreeChanged = true,
             .emailObjectsChanged = false,
             .optimisticProjection = unresolved,
+            .background = {.mailboxCountsChanged = true},
         });
         m_accountRuntime.refreshAccountConfiguration(accountId);
     }
@@ -1633,169 +1692,6 @@ namespace javelin::app
         return coordinator->second->requestMailboxSynchronization(mailboxId);
     }
 
-    void MailNotificationService::accountChanged(const QString& accountId)
-    {
-        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        const auto claimed = notifications.claimPendingEvents(accountId.toStdString());
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&claimed))
-        {
-            qWarning().noquote() << "Claim mail notification delivery failed" << error->message;
-            Q_EMIT deliveryRetryRequired(accountId);
-            return;
-        }
-
-        const auto& pending =
-            std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed);
-        if (pending.empty())
-            return;
-
-        std::map<std::string,
-                 std::vector<const javelin::jmap::cache::MailNotificationPendingEvent*>>
-            byMailbox;
-        for (const auto& event : pending)
-            byMailbox[event.mailboxId].push_back(&event);
-
-        javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
-        for (const auto& [mailboxId, events] : byMailbox)
-        {
-            QString mailboxName = QString::fromStdString(mailboxId);
-            const auto mailboxResult = mailboxes.find(accountId.toStdString(), mailboxId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxResult))
-            {
-                qWarning().noquote() << "Read notification mailbox name failed" << error->message;
-            }
-            else if (const auto& mailbox =
-                         std::get<std::optional<javelin::jmap::domain::Mailbox>>(mailboxResult);
-                     mailbox.has_value())
-            {
-                mailboxName = QString::fromStdString(mailbox->name);
-            }
-
-            const auto& target = *events.front();
-            const auto title = events.size() == 1
-                                   ? i18n("New mail in %1", mailboxName)
-                                   : i18np("%1 new message in %2", "%1 new messages in %2",
-                                           events.size(), mailboxName);
-            const auto message = subjectForDisplay(target.subject);
-            QStringList deliveredEmailIds;
-            deliveredEmailIds.reserve(static_cast<qsizetype>(events.size()));
-            for (const auto* event : events)
-                deliveredEmailIds.push_back(QString::fromStdString(event->emailId));
-
-            Q_EMIT notificationRaised(accountId, QString::fromStdString(mailboxId),
-                                      QString::fromStdString(target.threadId),
-                                      QString::fromStdString(target.emailId), mailboxName, title,
-                                      message, deliveredEmailIds);
-        }
-    }
-
-    std::optional<javelin::jmap::cache::DatabaseError>
-    MailNotificationService::markDelivered(const std::string_view accountId,
-                                           const QStringList& emailIds)
-    {
-        std::vector<std::string> ids;
-        ids.reserve(static_cast<std::size_t>(emailIds.size()));
-        for (const auto& emailId : emailIds)
-            ids.push_back(emailId.toStdString());
-        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        const auto error = notifications.markDelivered(accountId, ids);
-        if (error.has_value())
-            rememberLocalRetry(m_markDeliveredRetries, QString::fromUtf8(accountId), emailIds);
-        return error;
-    }
-
-    std::optional<javelin::jmap::cache::DatabaseError>
-    MailNotificationService::releaseDispatches(const std::string_view accountId,
-                                               const QStringList& emailIds)
-    {
-        std::vector<std::string> ids;
-        ids.reserve(static_cast<std::size_t>(emailIds.size()));
-        for (const auto& emailId : emailIds)
-            ids.push_back(emailId.toStdString());
-        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        const auto error = notifications.releaseDispatches(accountId, ids);
-        if (error.has_value())
-            rememberLocalRetry(m_releaseDispatchRetries, QString::fromUtf8(accountId), emailIds);
-        return error;
-    }
-
-    void MailNotificationService::rememberLocalRetry(RetryMap& retries, QString accountId,
-                                                     const QStringList& emailIds)
-    {
-        if (emailIds.isEmpty())
-            return;
-        auto& pending = retries[std::move(accountId)];
-        for (const auto& emailId : emailIds)
-            pending.insert(emailId);
-        scheduleLocalRetry();
-    }
-
-    void MailNotificationService::scheduleLocalRetry()
-    {
-        if (m_localRetryTimer.isActive() ||
-            (m_markDeliveredRetries.isEmpty() && m_releaseDispatchRetries.isEmpty()))
-            return;
-
-        if (m_localRetryAttempts == 0)
-        {
-            ++m_localRetryAttempts;
-            m_localRetryTimer.start(0);
-            return;
-        }
-
-        const auto exponent =
-            std::min(m_localRetryAttempts - 1, mailNotificationLocalRetryMaximumExponent);
-        ++m_localRetryAttempts;
-        m_localRetryTimer.start(
-            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                 std::chrono::seconds{1U << exponent})
-                                 .count()));
-    }
-
-    void MailNotificationService::retryLocalFailures()
-    {
-        auto deliveredRetries = std::exchange(m_markDeliveredRetries, {});
-        auto releaseRetries = std::exchange(m_releaseDispatchRetries, {});
-
-        for (auto it = deliveredRetries.cbegin(); it != deliveredRetries.cend(); ++it)
-        {
-            QStringList emailIds;
-            emailIds.reserve(it.value().size());
-            for (const auto& emailId : it.value())
-                emailIds.push_back(emailId);
-            if (const auto error = markDelivered(it.key().toStdString(), emailIds))
-                qWarning().noquote()
-                    << "Retry mail notification delivery acknowledgement failed" << error->message;
-        }
-
-        for (auto it = releaseRetries.cbegin(); it != releaseRetries.cend(); ++it)
-        {
-            QStringList emailIds;
-            emailIds.reserve(it.value().size());
-            for (const auto& emailId : it.value())
-                emailIds.push_back(emailId);
-            if (const auto error = releaseDispatches(it.key().toStdString(), emailIds))
-            {
-                qWarning().noquote()
-                    << "Retry mail notification dispatch release failed" << error->message;
-                continue;
-            }
-            Q_EMIT deliveryRetryRequired(it.key());
-        }
-
-        if (m_markDeliveredRetries.isEmpty() && m_releaseDispatchRetries.isEmpty())
-            m_localRetryAttempts = 0;
-        else
-            scheduleLocalRetry();
-    }
-
-    std::optional<javelin::jmap::cache::DatabaseError> MailNotificationService::recoverDispatches()
-    {
-        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
-        return notifications.recoverDispatches();
-    }
-
     void MailQueryApplicationService::publishCacheChange(MailCacheChange change)
     {
         Q_EMIT cacheCommitted(std::move(change));
@@ -1832,12 +1728,20 @@ namespace javelin::app
             .queryWindows = {},
             .searchWindows = {},
             .messageContentEmailIds = {std::move(emailId)},
+            .background = {.rawSourceAvailabilityChanged = true},
         });
     }
 
-    void
-    MailQueryApplicationService::publishThreadMaterializationCommitted(QString accountId,
-                                                                       const QStringList& threadIds)
+    void MailQueryApplicationService::publishThreadChildEmailsCommitted(
+        QString accountId, const QStringList& threadIds,
+        const javelin::jmap::sync::MailCommitEffects& effects)
+    {
+        publishThreadMaterializationCommitted(std::move(accountId), threadIds,
+                                              backgroundEffects(effects));
+    }
+
+    void MailQueryApplicationService::publishThreadMaterializationCommitted(
+        QString accountId, const QStringList& threadIds, MailBackgroundEffects background)
     {
         if (threadIds.empty())
             return;
@@ -1853,6 +1757,7 @@ namespace javelin::app
             .mailboxIds = {},
             .queryWindows = {},
             .searchWindows = {},
+            .background = std::move(background),
         };
         QSqlQuery mailboxWindows{m_databaseConnection.database()};
         mailboxWindows.prepare(QStringLiteral(
@@ -2267,7 +2172,8 @@ namespace javelin::app
                     .total = cached->total,
                 }},
                 .searchWindows = {},
-                .emailObjectsChanged = !refresh.changedEmailIds.empty(),
+                .emailObjectsChanged = refresh.effects.emailObjectsChanged,
+                .background = backgroundEffects(refresh.effects),
             });
             co_return MailboxWindowSummary{
                 .accountId = intent.accountId,
@@ -2326,7 +2232,8 @@ namespace javelin::app
                 .total = page.total,
             }},
             .searchWindows = {},
-            .emailObjectsChanged = false,
+            .emailObjectsChanged = page.effects.emailObjectsChanged,
+            .background = backgroundEffects(page.effects),
         });
         co_return summary;
     }
@@ -2640,7 +2547,8 @@ namespace javelin::app
                 .limit = page.limit,
                 .total = page.total,
             }},
-            .emailObjectsChanged = false,
+            .emailObjectsChanged = page.effects.emailObjectsChanged,
+            .background = backgroundEffects(page.effects),
         });
         co_return summary;
     }
@@ -3472,6 +3380,7 @@ namespace javelin::app
                 .mailboxTreeChanged = true,
                 .emailObjectsChanged = false,
                 .optimisticProjection = optimisticProjection,
+                .background = {.mailboxCountsChanged = true},
             });
         };
         auto result = co_await m_mailboxMutationEngine.setSubscribed(
@@ -3511,6 +3420,7 @@ namespace javelin::app
                 .mailboxTreeChanged = true,
                 .emailObjectsChanged = false,
                 .optimisticProjection = optimisticProjection,
+                .background = {.mailboxCountsChanged = true},
             });
         };
         auto result = co_await m_mailboxMutationEngine.create(
@@ -3550,6 +3460,7 @@ namespace javelin::app
                 .mailboxTreeChanged = true,
                 .emailObjectsChanged = false,
                 .optimisticProjection = optimisticProjection,
+                .background = {.mailboxCountsChanged = true},
             });
         };
         auto result = co_await m_mailboxMutationEngine.destroy(
@@ -3583,13 +3494,14 @@ namespace javelin::app
         std::string accountId, std::vector<javelin::jmap::EmailMailboxMutation> mutations)
     {
         QStringList affectedMailboxIds;
-        const auto appendMailboxIds = [&affectedMailboxIds](const auto& mailboxIds)
+        QStringList membershipMailboxIds;
+        const auto appendMailboxIds = [](QStringList& target, const auto& mailboxIds)
         {
             for (const auto& mailboxId : mailboxIds)
             {
                 const auto value = QString::fromStdString(mailboxId);
-                if (!affectedMailboxIds.contains(value))
-                    affectedMailboxIds.push_back(value);
+                if (!target.contains(value))
+                    target.push_back(value);
             }
         };
 
@@ -3601,7 +3513,15 @@ namespace javelin::app
                 return javelin::jmap::operationError(*error);
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
             if (email.has_value())
-                appendMailboxIds(email->mailboxIds);
+            {
+                appendMailboxIds(affectedMailboxIds, email->mailboxIds);
+                const bool changesMembership = mutation.destroy ||
+                                               !mutation.addMailboxIds.empty() ||
+                                               !mutation.removeMailboxIds.empty() ||
+                                               mutation.authoritativeMailboxIds.has_value();
+                if (changesMembership)
+                    appendMailboxIds(membershipMailboxIds, email->mailboxIds);
+            }
         }
 
         auto result = m_emailMutationEngine.queueBatch(accountId, std::move(mutations));
@@ -3611,10 +3531,22 @@ namespace javelin::app
 
         for (const auto& mutation : *queued)
         {
-            appendMailboxIds(mutation.patch.addMailboxIds);
-            appendMailboxIds(mutation.patch.removeMailboxIds);
+            appendMailboxIds(affectedMailboxIds, mutation.patch.addMailboxIds);
+            appendMailboxIds(affectedMailboxIds, mutation.patch.removeMailboxIds);
+            const bool changesMembership = mutation.patch.destroy ||
+                                           !mutation.patch.addMailboxIds.empty() ||
+                                           !mutation.patch.removeMailboxIds.empty() ||
+                                           mutation.patch.authoritativeMailboxIds.has_value();
+            if (changesMembership)
+            {
+                appendMailboxIds(membershipMailboxIds, mutation.patch.addMailboxIds);
+                appendMailboxIds(membershipMailboxIds, mutation.patch.removeMailboxIds);
+            }
             if (mutation.patch.authoritativeMailboxIds.has_value())
-                appendMailboxIds(*mutation.patch.authoritativeMailboxIds);
+            {
+                appendMailboxIds(affectedMailboxIds, *mutation.patch.authoritativeMailboxIds);
+                appendMailboxIds(membershipMailboxIds, *mutation.patch.authoritativeMailboxIds);
+            }
         }
 
         Q_EMIT cacheCommitted(MailCacheChange{
@@ -3625,6 +3557,7 @@ namespace javelin::app
             .mailboxTreeChanged = false,
             .emailObjectsChanged = false,
             .optimisticProjection = true,
+            .background = mailboxMembershipBackgroundEffects(membershipMailboxIds),
         });
         return result;
     }
@@ -3658,6 +3591,7 @@ namespace javelin::app
                                                 ? std::numeric_limits<std::size_t>::max()
                                                 : pendingEmailMutationBatchSize));
         QStringList affectedMailboxIds;
+        QStringList membershipMailboxIds;
         EmailMutationBatchSubmission groupedSubmission;
         if (operationGroupId.has_value())
         {
@@ -3672,11 +3606,18 @@ namespace javelin::app
                     for (const auto& mailboxId : batchMailboxIds)
                         if (!affectedMailboxIds.contains(mailboxId))
                             affectedMailboxIds.push_back(mailboxId);
+                    const auto batchMembershipIds = membershipMailboxIdsForPendingMutations(
+                        m_databaseConnection, accountId, operationGroupId, batchLimit);
+                    for (const auto& mailboxId : batchMembershipIds)
+                        if (!membershipMailboxIds.contains(mailboxId))
+                            membershipMailboxIds.push_back(mailboxId);
                 });
         }
         else
         {
             affectedMailboxIds = affectedMailboxIdsForPendingMutations(
+                m_databaseConnection, accountId, operationGroupId, batchLimit);
+            membershipMailboxIds = membershipMailboxIdsForPendingMutations(
                 m_databaseConnection, accountId, operationGroupId, batchLimit);
             auto single = co_await m_emailMutationEngine.submitPending(
                 toLiveConnectionSettings(configuration->second.settings), accountId,
@@ -3762,6 +3703,7 @@ namespace javelin::app
                 .mailboxTreeChanged = false,
                 .emailObjectsChanged = false,
                 .optimisticProjection = true,
+                .background = mailboxMembershipBackgroundEffects(membershipMailboxIds),
             });
         }
         co_return observed;

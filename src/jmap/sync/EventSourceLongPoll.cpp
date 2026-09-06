@@ -254,21 +254,18 @@ namespace javelin::jmap::sync
                                         QByteArray::fromStdString(subscription.lastState));
         }
 
-        QNetworkReply* reply = m_networkAccessManager.get(networkRequest);
+        QPointer<QNetworkReply> reply{m_networkAccessManager.get(networkRequest)};
         m_activeReply = reply;
         PushActivityTracker activity{m_statusCallback, *url, maximumPushActivityTimeout};
         const auto deleteReply = qScopeGuard(
             [this, reply]()
             {
                 if (m_activeReply == reply)
-                {
                     m_activeReply.clear();
-                }
-                if (reply != nullptr)
-                {
-                    QObject::disconnect(reply, nullptr, reply, nullptr);
-                    reply->deleteLater();
-                }
+                if (reply == nullptr)
+                    return;
+                QObject::disconnect(reply.data(), nullptr, reply.data(), nullptr);
+                reply->deleteLater();
             });
 
         QStringList subscribedTypes;
@@ -278,16 +275,14 @@ namespace javelin::jmap::sync
             << "push subscription sent for" << subscribedTypes.join(QStringLiteral(", "))
             << activity.serverBaseUrl();
 
-        QObject::connect(reply, &QObject::destroyed, reply,
-                         [this, reply]()
+        QObject::connect(reply.data(), &QObject::destroyed, reply.data(),
+                         [this, activeReply = reply.data()]()
                          {
-                             if (m_activeReply == reply)
-                             {
+                             if (m_activeReply == activeReply)
                                  m_activeReply.clear();
-                             }
                          });
         bool connectedReported = false;
-        QObject::connect(reply, &QNetworkReply::requestSent, reply,
+        QObject::connect(reply.data(), &QNetworkReply::requestSent, reply.data(),
                          [&activity, &connectedReported]()
                          {
                              if (!connectedReported)
@@ -352,8 +347,11 @@ namespace javelin::jmap::sync
         while (true)
         {
             if (cancellation.isCancelled())
-            {
                 co_return stream.summary();
+            if (reply == nullptr)
+            {
+                co_return makeTransportError(javelin::jmap::api::TransportErrorCode::Cancelled,
+                                             "Event-source reply was destroyed.");
             }
 
             if (reply->error() != QNetworkReply::NoError && reply->isFinished())
@@ -403,7 +401,13 @@ namespace javelin::jmap::sync
 
             if (!reply->isFinished() && reply->bytesAvailable() == 0)
             {
-                const bool ready = co_await qCoro(reply).waitForReadyRead(activity.timeout());
+                const bool ready =
+                    co_await qCoro(reply.data()).waitForReadyRead(activity.timeout());
+                if (reply == nullptr)
+                {
+                    co_return makeTransportError(javelin::jmap::api::TransportErrorCode::Cancelled,
+                                                 "Event-source reply was destroyed.");
+                }
                 if (!ready && !reply->isFinished())
                 {
                     reply->abort();
@@ -462,8 +466,12 @@ namespace javelin::jmap::sync
                 if (line.isEmpty())
                 {
                     if (const auto error = co_await finalizeEvent(); error.has_value())
-                    {
                         co_return *error;
+                    if (reply == nullptr)
+                    {
+                        co_return makeTransportError(
+                            javelin::jmap::api::TransportErrorCode::Cancelled,
+                            "Event-source reply was destroyed.");
                     }
                     continue;
                 }
@@ -509,8 +517,11 @@ namespace javelin::jmap::sync
                 }
 
                 if (const auto error = co_await finalizeEvent(); error.has_value())
-                {
                     co_return *error;
+                if (reply == nullptr)
+                {
+                    co_return makeTransportError(javelin::jmap::api::TransportErrorCode::Cancelled,
+                                                 "Event-source reply was destroyed.");
                 }
 
                 if (stream.summary().updateCount > 0)

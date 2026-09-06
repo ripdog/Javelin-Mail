@@ -439,6 +439,60 @@ TEST_CASE("offline sync does not run for a deleted mailbox", "[app][offline][del
     CHECK(resources.requests.empty());
 }
 
+TEST_CASE("targeted offline catch-up leaves unrelated complete mailboxes untouched",
+          "[app][offline][catch-up][targeted]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedAccount(database.connection);
+    QSqlQuery secondMailbox{database.connection.database()};
+    REQUIRE(secondMailbox.exec(QStringLiteral(
+        "INSERT INTO mailboxes(account_id,mailbox_id,name,role,total_emails,total_threads,"
+        "is_subscribed) VALUES('account-1','projects','Projects',NULL,1,1,1)")));
+
+    auto archiveEmail = email("archive-email", "archive-blob", "2026-09-05T00:00:00Z", 64);
+    upsertEmail(database.connection, archiveEmail);
+    auto projectsEmail = email("projects-email", "projects-blob", "2026-09-05T00:01:00Z", 64);
+    projectsEmail.mailboxIds = {"projects"};
+    upsertEmail(database.connection, std::move(projectsEmail));
+
+    RecordingResourceTransport resources;
+    RejectingMethodTransport methods;
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
+    javelin::app::WorkScheduler scheduler{database.connection, nullptr,
+                                          std::chrono::milliseconds{0}};
+    javelin::app::MailIndexService indexer{database.connection, scheduler};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
+    auto configured = configuration();
+    configured.mailboxIds = {"archive", "projects"};
+    service.applySettings({std::move(configured)});
+
+    QSqlQuery complete{database.connection.database()};
+    REQUIRE(complete.exec(
+        QStringLiteral("UPDATE offline_mailbox_scopes SET status='complete',generation=1,"
+                       "completed_generation=1,query_state='query-state',email_state='email-state' "
+                       "WHERE account_id='account-1'")));
+
+    service.requestCatchUp("account-1", {"archive"});
+
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT status='fetching' FROM offline_mailbox_scopes WHERE "
+                                "account_id='account-1' AND mailbox_id='archive'")) == 1);
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT status='complete' FROM offline_mailbox_scopes WHERE "
+                                "account_id='account-1' AND mailbox_id='projects'")) == 1);
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM offline_mailbox_membership WHERE "
+                                "account_id='account-1' AND mailbox_id='archive' AND "
+                                "email_id='archive-email'")) == 1);
+    CHECK(scalar(database.connection,
+                 QStringLiteral("SELECT COUNT(*) FROM offline_mailbox_membership WHERE "
+                                "account_id='account-1' AND mailbox_id='projects'")) == 0);
+}
+
 TEST_CASE("complete offline enumeration cannot turn historical unread mail into new mail",
           "[app][offline][notification][historical]")
 {

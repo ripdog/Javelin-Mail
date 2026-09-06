@@ -3,6 +3,7 @@
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include "app/ThreadMaterializationCoordinator.h"
+#include "jmap/sync/MailCommitEffects.h"
 
 #include <QObject>
 #include <QStringList>
@@ -38,7 +39,8 @@ namespace javelin::app
 
       Q_SIGNALS:
         void membershipCommitted(QString accountId, QStringList threadIds);
-        void childEmailsCommitted(QString accountId, QStringList threadIds, QStringList emailIds);
+        void childEmailsCommitted(QString accountId, QStringList threadIds, QStringList emailIds,
+                                  javelin::jmap::sync::MailCommitEffects effects);
         void progressChanged(QString accountId, quint64 completedThreadCount,
                              quint64 totalThreadCount);
 

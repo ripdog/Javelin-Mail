@@ -846,15 +846,42 @@ namespace javelin::app
 
     void FullMailSyncService::requestCatchUp(const std::string_view accountId)
     {
-        if (m_runningAccounts.contains(std::string{accountId}))
+        requestCatchUpImpl(std::string{accountId}, CatchUpDemand{.accountWide = true});
+    }
+
+    void FullMailSyncService::requestCatchUp(const std::string_view accountId,
+                                             std::vector<std::string> mailboxIds)
+    {
+        if (mailboxIds.empty())
+            return;
+        CatchUpDemand demand;
+        demand.mailboxIds.insert(std::make_move_iterator(mailboxIds.begin()),
+                                 std::make_move_iterator(mailboxIds.end()));
+        requestCatchUpImpl(std::string{accountId}, std::move(demand));
+    }
+
+    void FullMailSyncService::requestCatchUpImpl(std::string accountId, CatchUpDemand demand)
+    {
+        if (m_runningAccounts.contains(accountId))
         {
-            m_dirtyAccounts.insert(std::string{accountId});
+            auto& pending = m_pendingCatchUps[accountId];
+            if (pending.accountWide || demand.accountWide)
+            {
+                pending.accountWide = true;
+                pending.mailboxIds.clear();
+            }
+            else
+            {
+                pending.mailboxIds.insert(std::make_move_iterator(demand.mailboxIds.begin()),
+                                          std::make_move_iterator(demand.mailboxIds.end()));
+            }
             return;
         }
 
         for (const auto& [id, scope] : m_scopes)
         {
-            if (scope.accountId != accountId)
+            if (scope.accountId != accountId ||
+                (!demand.accountWide && !demand.mailboxIds.contains(scope.mailboxId)))
                 continue;
 
             auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
@@ -955,7 +982,7 @@ namespace javelin::app
 
         if (m_runningAccounts.contains(std::string{accountId}))
         {
-            m_dirtyAccounts.insert(std::string{accountId});
+            requestCatchUp(accountId);
             return;
         }
 
@@ -1009,8 +1036,13 @@ namespace javelin::app
                            {
                                m_scheduler.release(jobId);
                                m_runningAccounts.erase(accountId);
-                               if (m_dirtyAccounts.erase(accountId) != 0)
-                                   requestCatchUp(accountId);
+                               if (const auto pending = m_pendingCatchUps.find(accountId);
+                                   pending != m_pendingCatchUps.end())
+                               {
+                                   auto demand = std::move(pending->second);
+                                   m_pendingCatchUps.erase(pending);
+                                   requestCatchUpImpl(accountId, std::move(demand));
+                               }
                                schedulePump();
                            });
         }

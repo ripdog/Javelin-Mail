@@ -1,4 +1,5 @@
 #include "app/account/AccountSyncCoordinator.h"
+#include "app/MailNotificationDeliveryPort.h"
 #include "app/MailNotificationService.h"
 #include "app/WorkScheduler.h"
 #include "app/account/EndpointRetryGate.h"
@@ -36,6 +37,21 @@
 
 namespace
 {
+
+    class TestDeliveryPort final : public javelin::app::MailNotificationDeliveryPort
+    {
+      public:
+        [[nodiscard]] bool
+        deliverNewMail(const javelin::app::MailNotificationDelivery& notification) override
+        {
+            ++deliveryCount;
+            lastEmailId = notification.emailId;
+            return true;
+        }
+
+        int deliveryCount = 0;
+        QString lastEmailId;
+    };
 
     class ApplicationGuard
     {
@@ -503,20 +519,11 @@ TEST_CASE("committed Email delta page publishes before a failed continuation",
         }));
 
     javelin::app::MailNotificationService notifications{fixture.connection};
+    TestDeliveryPort delivery;
+    notifications.setDeliveryPort(&delivery);
     QObject::connect(&fixture.coordinator,
                      &javelin::app::AccountSyncCoordinator::notificationEventsCommitted,
                      &notifications, &javelin::app::MailNotificationService::accountChanged);
-    int deliveries = 0;
-    QObject::connect(
-        &notifications, &javelin::app::MailNotificationService::notificationRaised,
-        [&notifications, &deliveries](const QString& accountId, const QString&, const QString&,
-                                      const QString&, const QString&, const QString&,
-                                      const QString&, const QStringList& deliveredEmailIds)
-        {
-            ++deliveries;
-            REQUIRE_FALSE(notifications.markDelivered(accountId.toStdString(), deliveredEmailIds)
-                              .has_value());
-        });
 
     int emailPublications = 0;
     QObject::connect(&fixture.coordinator, &javelin::app::AccountSyncCoordinator::cacheCommitted,
@@ -530,10 +537,10 @@ TEST_CASE("committed Email delta page publishes before a failed continuation",
     fixture.transport.nextEmailDeltaCreatesPagedNotification = true;
     REQUIRE(fixture.coordinator.requestSynchronization());
     REQUIRE(waitUntil(
-        [&fixture, attemptsBefore, &deliveries, &emailPublications]
+        [&fixture, attemptsBefore, &delivery, &emailPublications]
         {
-            return fixture.transport.emailDeltaAttempts >= attemptsBefore + 2 && deliveries == 1 &&
-                   emailPublications >= 1;
+            return fixture.transport.emailDeltaAttempts >= attemptsBefore + 2 &&
+                   delivery.deliveryCount == 1 && emailPublications >= 1;
         }));
 
     javelin::jmap::cache::SyncStateRepository states{fixture.connection};
@@ -548,7 +555,7 @@ TEST_CASE("committed Email delta page publishes before a failed continuation",
 
     REQUIRE(waitUntil([&fixture, attemptsBefore]
                       { return fixture.transport.emailDeltaAttempts >= attemptsBefore + 3; }));
-    CHECK(deliveries == 1);
+    CHECK(delivery.deliveryCount == 1);
 
     javelin::jmap::cache::NotificationRepository repository{fixture.connection};
     const auto pending = repository.listPendingEvents("account-1");

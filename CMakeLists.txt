@@ -524,6 +524,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/account/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
     src/app/messages/MailApplicationService.cpp
+    src/app/messages/MailNotificationService.cpp
+    src/app/MailNotificationDeliveryPort.h
     src/app/AccountRuntimeManager.h
     src/app/CalendarApplicationService.h
     src/app/ContactApplicationService.h
@@ -1976,6 +1978,8 @@ add_library(javelin_daemon_core STATIC
     src/app/account/OAuthRefreshSingleFlight.cpp
     src/app/OAuthRefreshSingleFlight.h
     src/app/messages/MailApplicationService.cpp
+    src/app/messages/MailNotificationService.cpp
+    src/app/MailNotificationDeliveryPort.h
     src/app/AccountRuntimeManager.h
     src/app/CalendarApplicationService.h
     src/app/ContactApplicationService.h

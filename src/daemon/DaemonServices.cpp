@@ -311,10 +311,11 @@ namespace javelin::app
         QObject::connect(m_threadMembershipMaterializationWorker.get(),
                          &ThreadMembershipMaterializationWorker::childEmailsCommitted,
                          m_mailQueryApplicationService.get(),
-                         [this](QString accountId, const QStringList& threadIds, const QStringList&)
+                         [this](QString accountId, const QStringList& threadIds, const QStringList&,
+                                const javelin::jmap::sync::MailCommitEffects& effects)
                          {
-                             m_mailQueryApplicationService->publishThreadMaterializationCommitted(
-                                 std::move(accountId), threadIds);
+                             m_mailQueryApplicationService->publishThreadChildEmailsCommitted(
+                                 std::move(accountId), threadIds, effects);
                          });
         m_developerMaintenanceService = std::make_unique<DeveloperMaintenanceService>(
             location.databasePath, location.vaultRootPath, *m_mailboxMaintenanceRegistry,
@@ -346,6 +347,8 @@ namespace javelin::app
                     .optimisticProjection = false,
                     .contactsChanged = false,
                     .identitiesChanged = false,
+                    .background = {.offlineCatchUp = {.mailboxIds = {QString::fromStdString(
+                                                          operation.destinationMailboxId)}}},
                 });
                 if (operation.operation != MailTransferOperation::Move)
                     return;
@@ -363,6 +366,12 @@ namespace javelin::app
                     .optimisticProjection = false,
                     .contactsChanged = false,
                     .identitiesChanged = false,
+                    .background =
+                        operation.sourceMailboxId.has_value()
+                            ? MailBackgroundEffects{.offlineCatchUp =
+                                                        {.mailboxIds = {QString::fromStdString(
+                                                             *operation.sourceMailboxId)}}}
+                            : MailBackgroundEffects{},
                 });
                 if (!operation.sourceMailboxId.has_value())
                     m_fullMailSyncService->requestCatchUp(operation.sourceAccountId);
@@ -772,6 +781,11 @@ namespace javelin::app
     MailMutationApplicationService& DaemonServices::mailMutationApplicationService()
     {
         return *m_mailMutationApplicationService;
+    }
+
+    MessageContentApplicationService& DaemonServices::messageContentApplicationService()
+    {
+        return *m_messageContentApplicationService;
     }
 
     MailNotificationService& DaemonServices::mailNotificationService()

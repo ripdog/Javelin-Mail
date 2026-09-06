@@ -16,6 +16,7 @@
 #include "app/MailNotificationService.h"
 #include "app/MailQueryApplicationService.h"
 #include "app/MailboxSelectionMutation.h"
+#include "app/MessageContentApplicationService.h"
 #include "app/MessageSelection.h"
 #include "daemon/DaemonServices.h"
 #include "desktop/notifications/DesktopNotificationController.h"
@@ -29,6 +30,7 @@
 #include <QNetworkInformation>
 
 #include <utility>
+#include <vector>
 
 namespace javelin::app
 {
@@ -142,10 +144,6 @@ namespace javelin::app
                         .activationToken = activationToken,
                     });
                 });
-        m_notificationRetryTimer.setSingleShot(true);
-        m_notificationRetryTimer.setInterval(60000);
-        connect(&m_notificationRetryTimer, &QTimer::timeout, this,
-                &DaemonBackgroundController::retryMailNotifications);
     }
 
     DaemonBackgroundController::~DaemonBackgroundController()
@@ -161,43 +159,32 @@ namespace javelin::app
 
         auto& accountRuntime = m_services.accountRuntimeManager();
         auto& notificationService = m_services.mailNotificationService();
-        connect(&notificationService, &MailNotificationService::deliveryRetryRequired, this,
-                &DaemonBackgroundController::queueNotificationRetry);
-        connect(&notificationService, &MailNotificationService::notificationRaised, this,
-                [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
-                       const QString& emailId, const QString& mailboxName, const QString& title,
-                       const QString& message, const QStringList& deliveredEmailIds)
-                {
-                    if (m_notifications->notifyNewMail(accountId, mailboxId, threadId, emailId,
-                                                       mailboxName, title, message))
-                    {
-                        if (const auto error = m_services.mailNotificationService().markDelivered(
-                                accountId.toStdString(), deliveredEmailIds))
-                            qWarning().noquote()
-                                << QStringLiteral("Record mail notification delivery:")
-                                << error->message;
-                        return;
-                    }
-
-                    if (const auto error = m_services.mailNotificationService().releaseDispatches(
-                            accountId.toStdString(), deliveredEmailIds))
-                        qWarning().noquote()
-                            << QStringLiteral("Release mail notification delivery:")
-                            << error->message;
-                    queueNotificationRetry(accountId);
-                });
+        notificationService.setDeliveryPort(m_notifications.get());
         const auto cacheCommitted = [this](MailCacheChange change)
         {
-            m_services.localMaintenanceService().requestReplay();
-            const bool mailCacheChanged = !change.mailboxIds.isEmpty() ||
-                                          !change.queryWindows.empty() ||
-                                          !change.searchWindows.empty() ||
-                                          change.mailboxTreeChanged || change.emailObjectsChanged;
-            if (!change.optimisticProjection && mailCacheChanged)
-                m_services.fullMailSyncService().requestCatchUp(change.accountId.toStdString());
-            if (change.emailObjectsChanged)
+            const auto& background = change.background;
+            if (background.vaultProjectionWorkQueued)
+                m_services.localMaintenanceService().requestReplay();
+            if (!change.optimisticProjection && !background.offlineCatchUp.empty())
+            {
+                if (background.offlineCatchUp.accountWide)
+                {
+                    m_services.fullMailSyncService().requestCatchUp(change.accountId.toStdString());
+                }
+                else
+                {
+                    std::vector<std::string> mailboxIds;
+                    mailboxIds.reserve(
+                        static_cast<std::size_t>(background.offlineCatchUp.mailboxIds.size()));
+                    for (const auto& mailboxId : background.offlineCatchUp.mailboxIds)
+                        mailboxIds.push_back(mailboxId.toStdString());
+                    m_services.fullMailSyncService().requestCatchUp(change.accountId.toStdString(),
+                                                                    std::move(mailboxIds));
+                }
+            }
+            if (background.rawSourceAvailabilityChanged)
                 m_services.mailIndexService().requestIndex(change.accountId.toStdString());
-            if (mailCacheChanged)
+            if (background.mailboxCountsChanged)
                 refreshTrayUnreadCount();
         };
         connect(&accountRuntime, &AccountRuntimeManager::cacheCommitted, this, cacheCommitted);
@@ -208,6 +195,8 @@ namespace javelin::app
                 &MailQueryApplicationService::cacheCommitted, this, cacheCommitted);
         connect(&m_services.mailMutationApplicationService(),
                 &MailMutationApplicationService::cacheCommitted, this, cacheCommitted);
+        connect(&m_services.messageContentApplicationService(),
+                &MessageContentApplicationService::cacheCommitted, this, cacheCommitted);
         connect(&m_services.errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised, this,
                 [this](const QString& connectionId, const QString&, const QString& title,
                        const QString& message, const bool persistent, const bool opensSettings)
@@ -402,8 +391,7 @@ namespace javelin::app
         m_notifications->closeAllUndoableSendNotifications();
         if (!m_started && !m_tray->isAvailable())
             return;
-        m_notificationRetryTimer.stop();
-        m_notificationRetryAccounts.clear();
+        m_services.mailNotificationService().setDeliveryPort(nullptr);
         m_tray->stop();
         m_started = false;
     }
@@ -430,13 +418,6 @@ namespace javelin::app
                         "Network became reachable; reconnecting account synchronization");
                     m_services.accountRuntimeManager().networkBecameReachable();
                 });
-    }
-
-    void DaemonBackgroundController::retryMailNotifications()
-    {
-        const auto accounts = std::exchange(m_notificationRetryAccounts, {});
-        for (const auto& accountId : accounts)
-            m_services.mailNotificationService().accountChanged(accountId);
     }
 
     void DaemonBackgroundController::refreshTrayUnreadCount()
@@ -496,10 +477,4 @@ namespace javelin::app
             });
     }
 
-    void DaemonBackgroundController::queueNotificationRetry(const QString& accountId)
-    {
-        m_notificationRetryAccounts.insert(accountId);
-        if (!m_notificationRetryTimer.isActive())
-            m_notificationRetryTimer.start();
-    }
 } // namespace javelin::app

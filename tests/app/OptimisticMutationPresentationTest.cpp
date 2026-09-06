@@ -193,6 +193,12 @@ TEST_CASE("optimistic archive reaches mailbox sessions through daemon cache inva
     CHECK(inboxSession.state().items.front().emailId == "email-1");
 
     std::vector<javelin::app::MailCacheInvalidation> invalidations;
+    std::vector<javelin::app::MailCacheChange> mutationChanges;
+    QObject::connect(&services.mailMutationApplicationService(),
+                     &javelin::app::MailMutationApplicationService::cacheCommitted,
+                     &services.mailMutationApplicationService(),
+                     [&mutationChanges](javelin::app::MailCacheChange change)
+                     { mutationChanges.push_back(std::move(change)); });
     bool commandCompleted = false;
     bool optimisticInvalidationBeforeCompletion = false;
     QObject::connect(&services.mailApplicationEvents(),
@@ -302,11 +308,17 @@ TEST_CASE("optimistic archive reaches mailbox sessions through daemon cache inva
                    !archiveSession.state().items.front().isFlagged;
         });
 
+    const auto tagChangesBefore = mutationChanges.size();
     const auto tagged =
         QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesTag(
             "account-1", std::optional<std::string>{"archive"},
             {javelin::app::SelectedEmail{.emailId = "email-1"}}, "project-test", true));
     REQUIRE(std::holds_alternative<javelin::app::QueuedMessageSelectionMutation>(tagged));
+    REQUIRE(mutationChanges.size() > tagChangesBefore);
+    const auto& tagChange = mutationChanges.back();
+    CHECK(tagChange.optimisticProjection);
+    CHECK(tagChange.background.offlineCatchUp.empty());
+    CHECK_FALSE(tagChange.background.vaultProjectionWorkQueued);
     const auto untagged =
         QCoro::waitFor(services.mailMutationApplicationService().queueSetMessagesTag(
             "account-1", std::optional<std::string>{"archive"},
@@ -337,6 +349,7 @@ TEST_CASE("optimistic archive reaches mailbox sessions through daemon cache inva
                    archiveSession.state().items.size() == 1;
         });
 
+    const auto moveChangesBefore = mutationChanges.size();
     const auto moved =
         QCoro::waitFor(services.mailMutationApplicationService().queueMailboxSelectionMutation({
             .accountId = "account-1",
@@ -346,6 +359,12 @@ TEST_CASE("optimistic archive reaches mailbox sessions through daemon cache inva
             .destinationMailboxId = "archive",
         }));
     REQUIRE(std::holds_alternative<javelin::app::QueuedMailboxSelectionMutation>(moved));
+    REQUIRE(mutationChanges.size() > moveChangesBefore);
+    const auto& moveChange = mutationChanges.back();
+    CHECK(moveChange.optimisticProjection);
+    CHECK(moveChange.background.offlineCatchUp.mailboxIds.contains(QStringLiteral("archive")));
+    CHECK(moveChange.background.offlineCatchUp.mailboxIds.contains(QStringLiteral("inbox")));
+    CHECK(moveChange.background.vaultProjectionWorkQueued);
     waitFor(
         [&]
         { return inboxSession.state().items.empty() && archiveSession.state().items.size() == 1; });

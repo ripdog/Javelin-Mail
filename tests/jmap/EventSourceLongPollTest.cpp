@@ -1,17 +1,97 @@
+#include "jmap/sync/EventSourceLongPoll.h"
 #include "jmap/sync/PushActivityTracker.h"
 #include "jmap/sync/PushProtocol.h"
 #include "jmap/sync/PushStreamSession.h"
 
 #include <QCoroTask>
 
+#include <QCoreApplication>
+#include <QEventLoop>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QPointer>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
+#include <optional>
 #include <utility>
 
 using namespace std::chrono_literals;
 
 namespace
 {
+    class ApplicationGuard
+    {
+      public:
+        ApplicationGuard()
+        {
+            if (QCoreApplication::instance() != nullptr)
+                return;
+            static int argc = 1;
+            static char appName[] = "event-source-long-poll-test";
+            static char* argv[] = {appName, nullptr};
+            m_application = std::make_unique<QCoreApplication>(argc, argv);
+        }
+
+      private:
+        std::unique_ptr<QCoreApplication> m_application;
+    };
+
+    class PendingReply final : public QNetworkReply
+    {
+      public:
+        PendingReply(const QNetworkRequest& request, QObject* parent) : QNetworkReply(parent)
+        {
+            setRequest(request);
+            setUrl(request.url());
+            open(QIODevice::ReadOnly | QIODevice::Unbuffered);
+        }
+
+        void abort() override
+        {
+            setError(QNetworkReply::OperationCanceledError, QStringLiteral("cancelled"));
+            setFinished(true);
+            Q_EMIT finished();
+        }
+
+        void finishAndDestroy()
+        {
+            setFinished(true);
+            Q_EMIT finished();
+            delete this;
+        }
+
+      protected:
+        [[nodiscard]] qint64 readData(char*, qint64) override
+        {
+            return -1;
+        }
+    };
+
+    class DestroyableReplyNetworkAccessManager final : public QNetworkAccessManager
+    {
+      public:
+        QPointer<QNetworkReply> reply;
+
+        void finishAndDestroyReply()
+        {
+            if (reply != nullptr)
+                static_cast<PendingReply*>(reply.data())->finishAndDestroy();
+        }
+
+      protected:
+        QNetworkReply* createRequest(Operation operation, const QNetworkRequest& request,
+                                     QIODevice* outgoingData) override
+        {
+            Q_UNUSED(operation);
+            Q_UNUSED(outgoingData);
+            auto* pending = new PendingReply{request, this};
+            reply = pending;
+            return pending;
+        }
+    };
+
     class RecordingConsumer final : public javelin::jmap::sync::StateChangeConsumer
     {
       public:
@@ -185,4 +265,39 @@ TEST_CASE("push activity tracking shares status and timeout state", "[jmap][push
     CHECK(activity.serverBaseUrl() == QStringLiteral("https://mail.example.com:8443"));
     CHECK(activity.timeout() == 75s);
     CHECK_FALSE(activity.hasTimedOut());
+}
+
+TEST_CASE("event source reply destruction cancels a suspended consume safely",
+          "[jmap][push][event-source][lifetime]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    DestroyableReplyNetworkAccessManager networkAccessManager;
+    javelin::jmap::sync::EventSourceStateChangeSource source{
+        networkAccessManager, "https://example.test/events", "token"};
+    RecordingConsumer consumer;
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+    std::optional<javelin::jmap::sync::StateChangeSourceResult> completed;
+
+    auto task = source.consume(
+        {
+            .accountId = "account-1",
+            .lastState = {},
+            .types = {"Email"},
+            .groupwareAccountIds = {},
+        },
+        consumer, cancellation);
+    QCoro::connect(std::move(task), QCoreApplication::instance(),
+                   [&completed](javelin::jmap::sync::StateChangeSourceResult result)
+                   { completed = std::move(result); });
+    REQUIRE(networkAccessManager.reply != nullptr);
+
+    networkAccessManager.finishAndDestroyReply();
+    for (int iteration = 0; iteration < 10 && !completed.has_value(); ++iteration)
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+
+    REQUIRE(completed.has_value());
+    const auto* error = std::get_if<javelin::jmap::api::TransportError>(&*completed);
+    REQUIRE(error != nullptr);
+    CHECK(error->code == javelin::jmap::api::TransportErrorCode::Cancelled);
 }

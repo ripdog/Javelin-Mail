@@ -35,6 +35,7 @@
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/EmailMutationQueue.h"
 #include "jmap/sync/MailCacheRevision.h"
+#include "jmap/sync/MailCommitEffects.h"
 #include "jmap/sync/MailboxMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
@@ -3675,6 +3676,18 @@ namespace javelin::jmap
 
         auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
         auto emailIds = page.representativeIds;
+        javelin::jmap::sync::MailCommitEffects effects;
+        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
+        for (const auto& email : page.representatives)
+        {
+            const auto previousResult = emailRepository.find(accountId, email.id);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&previousResult))
+                co_return javelin::jmap::operationError(*error);
+            javelin::jmap::sync::accumulateMailCommitEffects(
+                effects, std::get<std::optional<javelin::jmap::domain::Email>>(previousResult),
+                email);
+        }
         auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
             *m_impl->databaseConnection, QStringLiteral("Materialize search window"));
         if (const auto* error =
@@ -3688,7 +3701,6 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         if (!std::get<bool>(revisionAdvanced))
             co_return MailQueryMaterializationSuperseded{};
-        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
         if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(), accountId,
                                                           page.representatives))
             co_return javelin::jmap::operationError(*error);
@@ -3731,6 +3743,7 @@ namespace javelin::jmap
             .total = page.total,
             .queryState = std::move(page.queryState),
             .results = std::move(results),
+            .effects = std::move(effects),
         };
     }
 
@@ -3783,6 +3796,18 @@ namespace javelin::jmap
         const auto materializedOffset = javelin::jmap::sync::materializedMailboxWindowOffset(
             offset, anchoredRequest, page.position);
         auto representativeIds = page.representativeIds;
+        javelin::jmap::sync::MailCommitEffects effects;
+        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
+        for (const auto& email : page.representatives)
+        {
+            const auto previousResult = emailRepository.find(accountId, email.id);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&previousResult))
+                co_return javelin::jmap::operationError(*error);
+            javelin::jmap::sync::accumulateMailCommitEffects(
+                effects, std::get<std::optional<javelin::jmap::domain::Email>>(previousResult),
+                email);
+        }
         const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
             .mailboxId = mailboxId,
             .sortProperty = javelin::jmap::query::propertyName(sort.property),
@@ -3802,7 +3827,6 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         if (!std::get<bool>(revisionAdvanced))
             co_return MailQueryMaterializationSuperseded{};
-        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
         if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(), accountId,
                                                           page.representatives))
             co_return javelin::jmap::operationError(*error);
@@ -3846,6 +3870,7 @@ namespace javelin::jmap
             .total = page.total,
             .queryState = std::move(page.queryState),
             .results = std::move(results),
+            .effects = std::move(effects),
         };
     }
 

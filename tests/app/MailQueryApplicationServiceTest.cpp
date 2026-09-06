@@ -305,6 +305,46 @@ namespace
     };
 } // namespace
 
+TEST_CASE("mail query materialization publishes only semantic background dependencies",
+          "[app][mail-query][background-effects]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+
+    std::vector<javelin::app::MailCacheChange> changes;
+    QObject::connect(&fixture.service, &javelin::app::MailQueryApplicationService::cacheCommitted,
+                     &fixture.service, [&changes](javelin::app::MailCacheChange change)
+                     { changes.push_back(std::move(change)); });
+
+    std::optional<javelin::app::MailboxWindowResult> firstResult;
+    auto first = fixture.service.requestMailboxWindow(fixture.pageIntent(true));
+    QCoro::connect(std::move(first), &fixture.service,
+                   [&firstResult](javelin::app::MailboxWindowResult result)
+                   { firstResult = std::move(result); });
+    REQUIRE(waitUntil([&firstResult] { return firstResult.has_value(); }));
+    REQUIRE(std::holds_alternative<javelin::app::MailboxWindowSummary>(*firstResult));
+    REQUIRE_FALSE(changes.empty());
+    const auto& firstChange = changes.back();
+    CHECK_FALSE(firstChange.background.offlineCatchUp.accountWide);
+    CHECK(firstChange.background.offlineCatchUp.mailboxIds == QStringList{QStringLiteral("inbox")});
+    CHECK(firstChange.background.vaultProjectionWorkQueued);
+
+    changes.clear();
+    std::optional<javelin::app::MailboxWindowResult> secondResult;
+    auto second = fixture.service.requestMailboxWindow(fixture.pageIntent(true));
+    QCoro::connect(std::move(second), &fixture.service,
+                   [&secondResult](javelin::app::MailboxWindowResult result)
+                   { secondResult = std::move(result); });
+    REQUIRE(waitUntil([&secondResult] { return secondResult.has_value(); }));
+    REQUIRE(std::holds_alternative<javelin::app::MailboxWindowSummary>(*secondResult));
+    REQUIRE_FALSE(changes.empty());
+    const auto& secondChange = changes.back();
+    CHECK_FALSE(secondChange.queryWindows.empty());
+    CHECK(secondChange.background.offlineCatchUp.empty());
+    CHECK_FALSE(secondChange.background.vaultProjectionWorkQueued);
+}
+
 TEST_CASE("mail query admission shares equivalent in-flight mailbox pages",
           "[app][mail-query][admission][single-flight]")
 {

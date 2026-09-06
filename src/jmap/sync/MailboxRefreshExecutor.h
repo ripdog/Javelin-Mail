@@ -2,6 +2,7 @@
 
 #include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
+#include "jmap/sync/MailCommitEffects.h"
 #include "jmap/sync/MutationJournal.h"
 #include "storage/sqlite/DatabaseConnection.h"
 
@@ -29,6 +30,7 @@ namespace javelin::jmap::sync
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
         std::vector<std::string> removedEmailIds;
+        MailCommitEffects effects;
     };
 
     using MailboxRefreshResult = std::variant<MailboxRefreshSummary, OperationError>;
