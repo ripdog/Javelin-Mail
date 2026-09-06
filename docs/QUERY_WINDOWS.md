@@ -42,11 +42,16 @@ requires server provenance. This prevents a locally complete mutation projection
 mistaken for authoritative query positioning, and prevents a partially materialized server response
 from being shown merely because it carries a new query state. Background synchronization
 materializes a missing, partial, or stale canonical window. A post-commit cache change names the
-window so an open view reloads effective SQLite state.
+exact persisted query key and window so an open view reloads effective SQLite state. That invalidation
+is evidence that cache state changed, not completion of an outstanding materialization request. The
+correlated daemon reply owns request completion and any server-returned anchored position; mailbox and
+search sessions may coalesce the resulting SQLite read but do not let an unrelated same-mailbox sort
+or window satisfy the request.
 
-### Thread membership and child materialization (accepted target; implementation pending)
+### Thread membership and child materialization
 
-The following coverage split is the accepted target for
+The daemon implements this coverage split through `ThreadMaterializationCoordinator` and
+`ThreadMembershipMaterializationWorker`; the earlier staged design is recorded in
 [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md). A
 collapsed query window is complete when every ordered representative id returned by `Email/query`
 has the representative Email data required by the message-list row. It is deliberately **not** a
@@ -54,12 +59,11 @@ claim that every Email in every represented Thread is cached. Query-window cover
 membership coverage, and child Email-object materialization are separate facts.
 
 The foreground materialization path therefore stops after the collapsed `Email/query` and bounded
-representative `Email/get` have committed. Once that window is displayable, daemon-owned background
-work automatically obtains Thread membership for its representatives and then fetches missing child
-Email objects in explicit bounded batches. The implementation must parse `Thread.emailIds` locally
-before issuing child `Email/get` calls; a result reference that flattens `/list/*/emailIds` directly
-into one `/get` is forbidden because the resulting id count is not bounded by the collapsed query
-limit.
+representative `Email/get` have committed. Once that window is displayable, the daemon coordinator
+schedules Thread membership work for its representatives and the worker fetches missing child Email
+objects in explicit bounded batches. The worker parses `Thread.emailIds` locally before issuing child
+`Email/get` calls; a result reference that flattens `/list/*/emailIds` directly into one `/get` is
+forbidden because the resulting id count is not bounded by the collapsed query limit.
 
 Thread membership is durable SQLite data with explicit freshness. Presence of one or more cached
 child Emails never proves complete Thread coverage. Conversely, a complete Thread membership

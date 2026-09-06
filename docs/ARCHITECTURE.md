@@ -177,10 +177,10 @@ The principal runtime objects are:
 | `DaemonProcess` | daemon | Starts settings, cache recovery, service composition, sockets, and daemon lifecycle |
 | `DaemonServices` | daemon | Composition root for writable repositories, JMAP transports, focused application services, command services, and background work |
 | `AccountRuntimeManager` | daemon | Owns account configuration, `AccountSyncCoordinator` lifetimes, session/authentication refresh, network recovery, and account status |
-| `MailQueryApplicationService` | daemon | Owns mailbox observations, mailbox/search materialization demand, Thread materialization demand, and query-cache publication |
+| `MailQueryApplicationService` | daemon | Owns mailbox observations, single-flight admission for canonical/interactive mailbox and search materialization, Thread materialization demand, and query-cache publication |
 | `MailMutationApplicationService` | daemon | Expands selections, queues/submits/reconciles Email and mailbox mutations, owns tag jobs, and implements mail history operations |
 | `MessageContentApplicationService` | daemon | Coordinates message body, attachment, and source retrieval plus content invalidation |
-| `MailNotificationService` | daemon | Owns mail-notification delivery acknowledgement/release/recovery and forwards claimed notification candidates |
+| `MailNotificationService` | daemon | Owns the local mail-notification delivery loop: durable claim/revalidation, grouping, desktop delivery through `MailNotificationDeliveryPort`, acknowledgement/release, retry, and restart recovery |
 | `ContactApplicationService` / `CalendarApplicationService` / `SieveApplicationService` | daemon | Own domain application workflow and history-facing coordination without sharing mail query, mutation, or account-runtime state |
 | `ContactProtocolClient` / `ContactSyncEngine` / `ContactMutationEngine` / `ContactMediaService` | daemon | Separate contacts wire access, authoritative cache synchronization, state-changing/group operations, and binary media transfer |
 | `CalendarCacheReader` / `CalendarProtocolClient` / `CalendarSyncEngine` / `CalendarMutationEngine` | daemon | Separate cached calendar reads, JMAP protocol access, bounded refresh/materialization, and optimistic calendar/event mutations |
@@ -196,7 +196,7 @@ The principal runtime objects are:
 | `WorkScheduler` | daemon | Prioritizes foreground, synchronization, indexing, offline, and maintenance work |
 | `ThreadMaterializationCoordinator` | daemon | Coalesces transient Thread targets from committed query windows and admits prefetch or interactive demand without persistent job rows |
 | `ThreadMembershipMaterializationWorker` | daemon | Fetches represented Thread membership and missing child Emails in explicit negotiated bounded batches, commits through optimistic consistency, and reconciles membership races |
-| `DaemonBackgroundController` | daemon | Owns notifications, reminders, delayed-send actions, network recovery, and tray integration |
+| `DaemonBackgroundController` | daemon | Composes desktop notification/action routing and fans typed committed background effects into maintenance, offline catch-up, indexing, tray refresh, reminders, delayed sends, and network recovery |
 | `GuiDaemonSession` | GUI | Connects, negotiates protocol/build identity, handles reconnect, and coordinates cache barriers |
 | `GuiServices` | GUI | Constructs read-only repositories and typed remote application-port adapters |
 | `RemoteActionClient` | GUI | Correlates bounded request/reply actions over the daemon session |
@@ -206,7 +206,7 @@ The principal runtime objects are:
 | `AuthenticationPromptCoordinator` / `ThemeController` | GUI | Own authentication prompt deduplication/reauth sequencing and dark-mode/palette/icon refresh state |
 | `ComposeTabController` / `ContactsTabController` / `CalendarTabController` | GUI | Own feature-tab workflows and toolbar state; `src/client/main.cpp` constructs them through typed factories against the shell's workspace surfaces |
 | `DaemonTrayController` | daemon | Publishes the KDE StatusNotifierItem and D-Bus menu without a Widgets dependency |
-| `DesktopNotificationController` | daemon | Publishes desktop notifications and stable GUI activation routes |
+| `DesktopNotificationController` | daemon | Publishes desktop notifications, implements the narrow mail-notification delivery port, and emits stable GUI/action activation routes |
 | cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |
 
 `MessageListSessionFactoryService` is composed only by `GuiServices`: mailbox and search sessions
@@ -297,7 +297,9 @@ WebSocket push or EventSource state change
   -> typed refresh and reconciliation
   -> cache commit and invalidation
   -> notification discovery outbox
-  -> desktop notification publication
+  -> MailNotificationService claim / revalidation / grouping
+  -> MailNotificationDeliveryPort desktop publication
+  -> durable acknowledgement or local release/retry
   -> optional activation route to GUI
 ```
 
@@ -356,11 +358,15 @@ identity and shared selection state. Selection restoration, activation, navigati
 action availability, and list presentation are separated into deterministic policies plus narrow Qt
 adapters so cache changes cannot reinterpret row numbers as user intent.
 
-`AccountSyncCoordinator` owns state-change consumption, debounce and single-flight refresh, state
-tokens, cache reconciliation, retries, and post-commit publication for one configured account.
-`AccountRuntimeManager` owns coordinator lifetime and configuration, while
-`MailQueryApplicationService` owns transient mailbox observation demand. Consumers reload affected
-state from SQLite only after the daemon has committed the corresponding transaction.
+`AccountSyncCoordinator` owns state-change consumption, bounded debounce, account-object refresh,
+state tokens, retries, and post-commit publication for one configured account. `AccountRuntimeManager`
+owns coordinator lifetime and configuration. Canonical mailbox refresh demand from the coordinator
+and interactive mailbox/search demand from the GUI converge in `MailQueryApplicationService`, which
+coalesces equivalent in-flight requests by the complete query/window identity and keeps explicit
+refresh, anchors, and retired searches distinct. A per-account mail-cache revision is captured before
+network query work and checked at the SQLite commit boundary so a delayed response cannot overwrite a
+newer Email/query commit; opaque server state tokens are never ordered locally. Consumers reload
+affected state from SQLite only after the daemon has committed the corresponding transaction.
 
 ## Cache materialization and navigation
 
@@ -371,13 +377,14 @@ materialize confirmed objects and authoritative query membership, rebase active 
 publish one typed post-commit cache change. There is no generic cross-type object table and no
 untyped JMAP value bag.
 
-The accepted next Email materialization architecture, pending implementation in
-[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md), makes
-authoritative collapsed-query materialization intentionally narrower than complete conversation
-hydration. A complete mailbox or search query window contains the exact ordered `Email/query`
-representative ids and enough representative Email objects to render every row in that window.
-Thread membership and non-representative child Email objects are separate cache coverage. Their
-absence does not make the query window partial or stale.
+Authoritative collapsed-query materialization is intentionally narrower than complete conversation
+hydration. The implemented daemon path is coordinated by `ThreadMaterializationCoordinator` and
+`ThreadMembershipMaterializationWorker`; the staged design history remains in
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md). A
+complete mailbox or search query window contains the exact ordered `Email/query` representative ids
+and enough representative Email objects to render every row in that window. Thread membership and
+non-representative child Email objects are separate cache coverage. Their absence does not make the
+query window partial or stale.
 
 After a collapsed window commits and becomes renderable, the daemon automatically schedules
 bounded background thread materialization for its representatives. That work obtains Thread
@@ -390,10 +397,22 @@ GUI does not create a second thread-loading source of truth or perform network w
 Background watched-mailbox refresh uses the canonical received-at-descending collapsed window, so a
 synchronized mailbox is immediately loadable from SQLite even while its conversation children are
 still being prefetched. Any page or thread fetch that writes server Email objects reapplies active
-Email projections before the cache can be rendered. `ContactSyncEngine` materializes AddressBook
-and ContactCard snapshots through the contact repositories, while `CalendarSyncEngine` materializes
-CalendarEvent objects and bounded occurrence windows through the calendar repositories. Their state
-tokens, eviction rules, and optimistic adapters remain independent from mail and from each other.
+Email projections before the cache can be rendered.
+
+Post-commit presentation invalidation and background scheduling use different facts. `MailCacheChange`
+carries bounded typed background effects derived from the actual before/after Email state: old/new
+mailbox membership or blob identity targets offline catch-up, raw-source availability wakes indexing,
+mailbox-count changes wake tray reads, and queued vault projection work wakes local maintenance. A
+bounded mailbox scope widens explicitly to account-wide recovery on overflow or when a rebaseline or
+startup/recovery path cannot prove a narrower scope. Query-window-only and keyword-only changes do not
+imply offline enumeration, and optimistic projections remain excluded from remote offline catch-up.
+The GUI-facing invalidation domains remain presentation hints and are never interpreted as this
+scheduler dependency API.
+
+`ContactSyncEngine` materializes AddressBook and ContactCard snapshots through the contact
+repositories, while `CalendarSyncEngine` materializes CalendarEvent objects and bounded occurrence
+windows through the calendar repositories. Their state tokens, eviction rules, and optimistic
+adapters remain independent from mail and from each other.
 
 Starting or restarting an account coordinator schedules an immediate synchronization pass for all
 configured mailboxes; a quiet push stream is not proof that their cache already exists. Likewise,
@@ -450,9 +469,14 @@ through `MailDeltaRefreshExecutor`. Neither retry owner activates a mailbox inde
 committed Email-baseline transaction replaces the active set. The delivery service claims pending
 outbox rows and revalidates unread state,
 current mailbox eligibility, and object existence entirely from SQLite before showing a popup.
-Successful delivery removes the outbox row while preserving the per-Email consumption marker; claim,
-acknowledgement, release, and desktop-presentation failures are retried locally and do not request
-JMAP synchronization solely to recover notification delivery.
+`MailNotificationService` owns that entire local delivery loop. It claims and groups eligible rows,
+uses the injected `MailNotificationDeliveryPort` for desktop publication, and on success removes the
+outbox row while preserving the per-Email consumption marker. A failed acknowledgement retries only
+the acknowledgement. A failed desktop publication releases the durable claim before that event can
+be delivered again; a failed release is retried before redelivery is rearmed. Claim, acknowledgement,
+release, and desktop-presentation failures are therefore local delivery work and do not request JMAP
+synchronization solely to recover notification delivery. Notification-baseline activation remains an
+account-synchronization responsibility and is not part of this retry loop.
 
 Mailbox query windows remain presentation coverage only. Notification routing to a concrete Email
 may use its mailbox context to open/materialize the relevant view, but query-window population,

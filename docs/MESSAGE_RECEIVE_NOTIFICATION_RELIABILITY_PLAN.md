@@ -1,4 +1,12 @@
-# Message Receive And Notification Reliability Plan
+# Message Receive And Notification Reliability Plan (Historical)
+
+> **Historical implementation plan.** This document records an earlier reliability milestone and is
+> not normative for current mail synchronization or notification policy. Current behavior is defined
+> by [ARCHITECTURE.md](ARCHITECTURE.md), [QUERY_WINDOWS.md](QUERY_WINDOWS.md),
+> [OPTIMISTIC_CONSISTENCY.md](OPTIMISTIC_CONSISTENCY.md), and
+> [MAIL_PATHWAYS_AUDIT.md](MAIL_PATHWAYS_AUDIT.md). In particular, the Inbox-only and cache-novelty
+> notification guidance below has been superseded by configured active notification mailboxes,
+> transition-based eligibility, and durable per-Email consumption/outbox state.
 
 ## Goal
 
