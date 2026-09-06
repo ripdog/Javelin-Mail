@@ -2073,63 +2073,80 @@ namespace javelin::app
             };
             javelin::jmap::sync::MailboxRefreshExecutor executor{m_databaseConnection, caller,
                                                                  context};
-            auto refreshResult = co_await executor.refreshCollapsedMailbox(
-                intent.accountId, intent.mailboxId, {}, intent.forceRefresh,
-                account->remoteAccountId);
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
+            bool forceFullRefresh = intent.forceRefresh;
+            while (true)
             {
-                m_errorCoordinator.reportFailure(*configuration, intent.accountId,
-                                                 QStringLiteral("Load mailbox messages"), *error);
-                co_return *error;
-            }
-            const auto& refresh =
-                std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult);
-            if (refresh.superseded)
-                co_return QueryAdmissionSuperseded{};
-            m_errorCoordinator.reportSuccess(configuration->connectionId);
+                auto refreshResult = co_await executor.refreshCollapsedMailbox(
+                    intent.accountId, intent.mailboxId, {}, forceFullRefresh,
+                    account->remoteAccountId);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
+                {
+                    m_errorCoordinator.reportFailure(*configuration, intent.accountId,
+                                                     QStringLiteral("Load mailbox messages"),
+                                                     *error);
+                    co_return *error;
+                }
+                auto refresh =
+                    std::get<javelin::jmap::sync::MailboxRefreshSummary>(std::move(refreshResult));
+                if (refresh.superseded)
+                    co_return QueryAdmissionSuperseded{};
 
-            Q_EMIT cacheCommitted(MailCacheChange{
-                .accountId = QString::fromStdString(intent.accountId),
-                .mailboxIds = {QString::fromStdString(intent.mailboxId)},
-                .queryWindows = {MailboxQueryWindowChange{
-                    .mailboxId = QString::fromStdString(intent.mailboxId),
-                    .queryKey = QString::fromStdString(queryKey),
+                std::vector<MailboxQueryWindowChange> queryWindows;
+                if (refresh.canonicalWindow.has_value())
+                {
+                    queryWindows.push_back(MailboxQueryWindowChange{
+                        .mailboxId = QString::fromStdString(intent.mailboxId),
+                        .queryKey = QString::fromStdString(queryKey),
+                        .offset = 0,
+                        .limit = 100,
+                        .total = refresh.canonicalWindow->total,
+                    });
+                }
+                Q_EMIT cacheCommitted(MailCacheChange{
+                    .accountId = QString::fromStdString(intent.accountId),
+                    .mailboxIds = {QString::fromStdString(intent.mailboxId)},
+                    .queryWindows = std::move(queryWindows),
+                    .searchWindows = {},
+                    .emailObjectsChanged = refresh.effects.emailObjectsChanged,
+                    .background = backgroundEffects(refresh.effects),
+                });
+
+                if (refresh.requiresFullRefresh)
+                {
+                    forceFullRefresh = true;
+                    continue;
+                }
+
+                m_errorCoordinator.reportSuccess(configuration->connectionId);
+                if (!refresh.canonicalWindow.has_value())
+                {
+                    co_return javelin::jmap::OperationError{
+                        .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                        .message = QStringLiteral(
+                            "Canonical mailbox refresh did not return its committed query window."),
+                    };
+                }
+                if (m_threadMaterializationCoordinator != nullptr)
+                {
+                    if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                            intent.accountId, queryKey, 0, 100,
+                            WorkPriority::VisibleMaterialization))
+                        qWarning().noquote() << "Could not enqueue refreshed mailbox Thread "
+                                                "materialization"
+                                             << error->message;
+                }
+                co_return MailboxWindowSummary{
+                    .accountId = intent.accountId,
+                    .mailboxId = intent.mailboxId,
                     .offset = 0,
                     .limit = 100,
-                    .total = refresh.canonicalWindow.has_value() ? refresh.canonicalWindow->total
-                                                                 : std::nullopt,
-                }},
-                .searchWindows = {},
-                .emailObjectsChanged = refresh.effects.emailObjectsChanged,
-                .background = backgroundEffects(refresh.effects),
-            });
-            if (!refresh.canonicalWindow.has_value())
-            {
-                co_return javelin::jmap::OperationError{
-                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
-                    .message = QStringLiteral(
-                        "Canonical mailbox refresh did not return its committed query window."),
+                    .position = refresh.canonicalWindow->position,
+                    .returnedLimit = refresh.canonicalWindow->returnedLimit,
+                    .representativeCount = refresh.canonicalWindow->representativeCount,
+                    .total = refresh.canonicalWindow->total,
+                    .queryState = refresh.canonicalWindow->queryState,
                 };
             }
-            if (m_threadMaterializationCoordinator != nullptr)
-            {
-                if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
-                        intent.accountId, queryKey, 0, 100, WorkPriority::VisibleMaterialization))
-                    qWarning().noquote() << "Could not enqueue refreshed mailbox Thread "
-                                            "materialization"
-                                         << error->message;
-            }
-            co_return MailboxWindowSummary{
-                .accountId = intent.accountId,
-                .mailboxId = intent.mailboxId,
-                .offset = 0,
-                .limit = 100,
-                .position = refresh.canonicalWindow->position,
-                .returnedLimit = refresh.canonicalWindow->returnedLimit,
-                .representativeCount = refresh.canonicalWindow->representativeCount,
-                .total = refresh.canonicalWindow->total,
-                .queryState = refresh.canonicalWindow->queryState,
-            };
         }
 
         auto result = co_await m_queryMaterializer.queryMailboxPage(

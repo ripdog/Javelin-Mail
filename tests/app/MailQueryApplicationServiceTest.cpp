@@ -9,6 +9,7 @@
 #include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailTagReadRepository.h"
 #include "jmap/cache/MailboxFilterReadRepository.h"
 #include "jmap/cache/MailboxMessageReadRepository.h"
@@ -36,6 +37,7 @@
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <variant>
@@ -91,6 +93,7 @@ namespace
         std::size_t calls = 0;
         std::size_t emailQueryCalls = 0;
         std::chrono::milliseconds delay{40};
+        bool failFullFallbackAfterIncrementalCommit = false;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest request) override
@@ -110,10 +113,38 @@ namespace
             }
 
             const auto queryState = "query-state-" + std::to_string(callNumber);
+            if (m_fallbackFailureArmed &&
+                std::ranges::any_of(request.envelope.methodCalls, [](const auto& invocation)
+                                    { return invocation.name == "Email/query"; }))
+            {
+                m_fallbackFailureArmed = false;
+                co_return javelin::jmap::api::TransportError{
+                    .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+                    .message = "forced full mailbox fallback failure",
+                };
+            }
             javelin::jmap::api::ResponseEnvelope response;
             response.sessionState = "session-state";
             for (const auto& invocation : request.envelope.methodCalls)
             {
+                if (invocation.name == "Email/queryChanges")
+                {
+                    if (!failFullFallbackAfterIncrementalCommit)
+                    {
+                        co_return javelin::jmap::api::ProtocolError{
+                            .code = javelin::jmap::api::ProtocolErrorCode::InvalidRequest,
+                            .message = "Unexpected incremental mailbox query in admission test",
+                        };
+                    }
+                    m_fallbackFailureArmed = true;
+                    response.methodResponses.push_back({
+                        .name = invocation.name,
+                        .arguments =
+                            R"({"accountId":"remote-1","oldQueryState":"query-state-1","newQueryState":"query-state-fallback","added":[{"id":"email-2","index":0}],"removed":[],"hasMoreChanges":true,"total":2})",
+                        .callId = invocation.callId,
+                    });
+                    continue;
+                }
                 if (invocation.name == "Email/query")
                 {
                     const auto queryPosition =
@@ -130,10 +161,13 @@ namespace
                 }
                 if (invocation.name == "Email/get")
                 {
+                    const bool incrementalAdded = invocation.callId == "updated-emails-get";
                     response.methodResponses.push_back({
                         .name = invocation.name,
                         .arguments =
-                            R"({"accountId":"remote-1","state":"email-state-1","list":[{"id":"email-1","blobId":"blob-1","threadId":"thread-1","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-09-05T00:00:00Z","hasAttachment":false,"subject":"Admission test","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})",
+                            incrementalAdded
+                                ? R"({"accountId":"remote-1","state":"email-state-2","list":[{"id":"email-2","blobId":"blob-2","threadId":"thread-2","mailboxIds":{"inbox":true},"keywords":{},"size":43,"receivedAt":"2026-09-05T00:00:01Z","hasAttachment":false,"subject":"Committed before fallback","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})"
+                                : R"({"accountId":"remote-1","state":"email-state-1","list":[{"id":"email-1","blobId":"blob-1","threadId":"thread-1","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-09-05T00:00:00Z","hasAttachment":false,"subject":"Admission test","from":[],"to":[],"cc":[],"bcc":[],"replyTo":[],"preview":"Preview"}],"notFound":[]})",
                         .callId = invocation.callId,
                     });
                     continue;
@@ -145,6 +179,9 @@ namespace
             }
             co_return response;
         }
+
+      private:
+        bool m_fallbackFailureArmed = false;
     };
 
     [[nodiscard]] javelin::jmap::api::Session testSession()
@@ -414,6 +451,50 @@ TEST_CASE("canonical background and foreground mailbox demand share one request"
     const auto& summary = std::get<javelin::app::MailboxWindowSummary>(*foregroundResult);
     CHECK(summary.total == std::optional<std::size_t>{101});
     CHECK(summary.representativeCount == 1);
+}
+
+TEST_CASE("canonical fallback publishes its committed delta before a later network failure",
+          "[app][mail-query][canonical][publication][fallback]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+
+    std::optional<javelin::app::CanonicalMailboxRefreshResult> initialResult;
+    auto initial = fixture.service.refreshCanonicalMailbox("account-1", "inbox");
+    QCoro::connect(std::move(initial), &fixture.service,
+                   [&initialResult](javelin::app::CanonicalMailboxRefreshResult result)
+                   { initialResult = std::move(result); });
+    REQUIRE(waitUntil([&initialResult] { return initialResult.has_value(); }));
+    REQUIRE(std::holds_alternative<javelin::app::CanonicalMailboxRefreshSummary>(*initialResult));
+
+    std::vector<javelin::app::MailCacheChange> changes;
+    QObject::connect(&fixture.service, &javelin::app::MailQueryApplicationService::cacheCommitted,
+                     &fixture.service, [&changes](javelin::app::MailCacheChange change)
+                     { changes.push_back(std::move(change)); });
+    fixture.methodTransport.failFullFallbackAfterIncrementalCommit = true;
+
+    std::optional<javelin::app::CanonicalMailboxRefreshResult> fallbackResult;
+    auto fallback = fixture.service.refreshCanonicalMailbox("account-1", "inbox");
+    QCoro::connect(std::move(fallback), &fixture.service,
+                   [&fallbackResult](javelin::app::CanonicalMailboxRefreshResult result)
+                   { fallbackResult = std::move(result); });
+    REQUIRE(waitUntil([&fallbackResult] { return fallbackResult.has_value(); }));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(*fallbackResult));
+
+    REQUIRE(changes.size() == 1);
+    CHECK(changes.front().mailboxIds == QStringList{QStringLiteral("inbox")});
+    CHECK(changes.front().queryWindows.empty());
+    CHECK(changes.front().emailObjectsChanged);
+    CHECK(changes.front().background.offlineCatchUp.mailboxIds ==
+          QStringList{QStringLiteral("inbox")});
+
+    javelin::jmap::cache::EmailRepository emails{fixture.database};
+    const auto committed = emails.find("account-1", "email-2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(committed));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(committed).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(committed)->subject ==
+          "Committed before fallback");
 }
 
 TEST_CASE("mail query admission merges explicit refreshes into one follow-up request",

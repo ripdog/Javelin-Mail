@@ -3769,7 +3769,8 @@ namespace javelin::jmap
                                                           page.representatives))
             co_return javelin::jmap::operationError(*error);
         if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
-                transaction, *m_impl->databaseConnection, accountId, emailIds, page.emailState))
+                transaction, *m_impl->databaseConnection, accountId, emailIds, page.emailState,
+                &effects))
             co_return *error;
         javelin::jmap::cache::SearchWindowRepository searchWindowRepository{
             *m_impl->databaseConnection};
@@ -3896,7 +3897,7 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
                 transaction, *m_impl->databaseConnection, accountId, representativeIds,
-                page.emailState))
+                page.emailState, &effects))
             co_return *error;
         javelin::jmap::cache::MailboxWindowRepository windowRepository{*m_impl->databaseConnection};
         if (const auto error = windowRepository.replace(

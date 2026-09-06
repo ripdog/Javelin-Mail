@@ -161,12 +161,11 @@ namespace javelin::jmap::sync
             return std::nullopt;
         }
 
-        [[nodiscard]] std::optional<OperationError>
-        reapplyPendingEmailPatches(javelin::jmap::sync::MutationProjectionTransaction& transaction,
-                                   javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                   const std::string_view accountId,
-                                   std::vector<std::string> emailIds,
-                                   const std::string_view serverState)
+        [[nodiscard]] std::optional<OperationError> reapplyPendingEmailPatches(
+            javelin::jmap::sync::MutationProjectionTransaction& transaction,
+            javelin::jmap::cache::DatabaseConnection& databaseConnection,
+            const std::string_view accountId, std::vector<std::string> emailIds,
+            const std::string_view serverState, MailCommitEffects* reconciliationEffects)
         {
             const auto ids = deduplicatedIds(std::move(emailIds));
             if (ids.empty())
@@ -197,6 +196,7 @@ namespace javelin::jmap::sync
             std::vector<javelin::jmap::domain::Email> reconciledEmails;
             reconciledEmails.reserve(activeByEmail.size());
             std::vector<std::string> acceptedMutationIds;
+            std::vector<javelin::jmap::sync::EmailPatchMutation> acceptedPatches;
 
             const auto patchSatisfied = [](const javelin::jmap::domain::Email& email,
                                            const javelin::jmap::sync::EmailPatchMutation& patch)
@@ -239,13 +239,15 @@ namespace javelin::jmap::sync
 
                 auto pendingActions = std::move(pending->second);
                 std::erase_if(pendingActions,
-                              [&email, &acceptedMutationIds, &patchSatisfied](const auto& action)
+                              [&email, &acceptedMutationIds, &acceptedPatches,
+                               &patchSatisfied](const auto& action)
                               {
                                   if (action.status !=
                                           javelin::jmap::sync::MutationStatus::Unknown ||
                                       action.patch.destroy || !patchSatisfied(*email, action.patch))
                                       return false;
                                   acceptedMutationIds.push_back(action.mutationId);
+                                  acceptedPatches.push_back(action.patch);
                                   return true;
                               });
 
@@ -255,6 +257,19 @@ namespace javelin::jmap::sync
 
             if (!acceptedMutationIds.empty())
             {
+                if (reconciliationEffects != nullptr)
+                {
+                    for (const auto& patch : acceptedPatches)
+                    {
+                        if (patch.addMailboxIds.empty() && patch.removeMailboxIds.empty())
+                            continue;
+                        reconciliationEffects->mailboxMembershipChanged = true;
+                        for (const auto& mailboxId : patch.addMailboxIds)
+                            appendAffectedMailboxId(*reconciliationEffects, mailboxId);
+                        for (const auto& mailboxId : patch.removeMailboxIds)
+                            appendAffectedMailboxId(*reconciliationEffects, mailboxId);
+                    }
+                }
                 const std::array domains{javelin::jmap::sync::ConsistencyDomain{
                     .accountId = std::string{accountId},
                     .dataType = "Email",
@@ -672,11 +687,10 @@ namespace javelin::jmap::sync
 
     } // namespace
 
-    std::optional<OperationError>
-    rebaseActiveEmailProjections(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                 const std::string_view accountId,
-                                 std::vector<std::string> emailIds,
-                                 const std::string_view serverState)
+    std::optional<OperationError> rebaseActiveEmailProjections(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        const std::string_view accountId, std::vector<std::string> emailIds,
+        const std::string_view serverState, MailCommitEffects* reconciliationEffects)
     {
         auto transactionResult = MutationProjectionTransaction::begin(
             databaseConnection, QStringLiteral("Rebase Email mutations"));
@@ -684,23 +698,23 @@ namespace javelin::jmap::sync
                 std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             return operationError(*error);
         auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
-        if (const auto error = reapplyPendingEmailPatches(
-                transaction, databaseConnection, accountId, std::move(emailIds), serverState))
+        if (const auto error =
+                reapplyPendingEmailPatches(transaction, databaseConnection, accountId,
+                                           std::move(emailIds), serverState, reconciliationEffects))
             return error;
         if (const auto error = transaction.commit())
             return operationError(*error);
         return std::nullopt;
     }
 
-    std::optional<OperationError>
-    rebaseActiveEmailProjections(MutationProjectionTransaction& transaction,
-                                 javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                 const std::string_view accountId,
-                                 std::vector<std::string> emailIds,
-                                 const std::string_view serverState)
+    std::optional<OperationError> rebaseActiveEmailProjections(
+        MutationProjectionTransaction& transaction,
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        const std::string_view accountId, std::vector<std::string> emailIds,
+        const std::string_view serverState, MailCommitEffects* reconciliationEffects)
     {
         return reapplyPendingEmailPatches(transaction, databaseConnection, accountId,
-                                          std::move(emailIds), serverState);
+                                          std::move(emailIds), serverState, reconciliationEffects);
     }
 
     MailboxRefreshExecutor::MailboxRefreshExecutor(
@@ -949,7 +963,7 @@ namespace javelin::jmap::sync
                         updatedEmailIds.push_back(email.id);
                     if (const auto error = reapplyPendingEmailPatches(
                             transaction, m_databaseConnection, accountId,
-                            std::move(updatedEmailIds), incremental.emailState))
+                            std::move(updatedEmailIds), incremental.emailState, &effects))
                         co_return *error;
                 }
                 if (!incremental.requiresFullFetch)
@@ -965,8 +979,29 @@ namespace javelin::jmap::sync
                     if (const auto error = captureCanonicalWindow())
                         co_return *error;
                 }
+                else if (const auto error = canonicalWindows.invalidateMailbox(
+                             cacheTransaction, accountId, mailboxId,
+                             javelin::jmap::cache::QueryWindowCoverage::Stale))
+                {
+                    co_return javelin::jmap::operationError(*error);
+                }
                 if (const auto error = transaction.commit())
                     co_return javelin::jmap::operationError(*error);
+            }
+
+            if (incremental.requiresFullFetch && !incremental.updatedEmails.empty())
+            {
+                co_return MailboxRefreshSummary{
+                    .representativeCount = incremental.representativeCount,
+                    .canonicalWindow = std::nullopt,
+                    .usedIncrementalRefresh = false,
+                    .canonicalWindowMaterialized = false,
+                    .requiresFullRefresh = true,
+                    .changedEmailIds = std::move(changedEmailIds),
+                    .insertedEmailIds = std::move(insertedEmailIds),
+                    .removedEmailIds = std::move(removedEmailIds),
+                    .effects = std::move(effects),
+                };
             }
 
             if (!incremental.requiresFullFetch)
@@ -1080,9 +1115,9 @@ namespace javelin::jmap::sync
             fetchedEmailIds.reserve(fetch.emails.size());
             for (const auto& email : fetch.emails)
                 fetchedEmailIds.push_back(email.id);
-            if (const auto error =
-                    reapplyPendingEmailPatches(transaction, m_databaseConnection, accountId,
-                                               std::move(fetchedEmailIds), fetch.emailState))
+            if (const auto error = reapplyPendingEmailPatches(transaction, m_databaseConnection,
+                                                              accountId, std::move(fetchedEmailIds),
+                                                              fetch.emailState, &effects))
                 co_return *error;
             if (const auto error = canonicalWindows.replace(
                     cacheTransaction,
@@ -1116,6 +1151,7 @@ namespace javelin::jmap::sync
             .canonicalWindow = std::move(committedCanonicalWindow),
             .usedIncrementalRefresh = usedIncrementalRefresh,
             .canonicalWindowMaterialized = !usedIncrementalRefresh,
+            .requiresFullRefresh = false,
             .changedEmailIds = std::move(changedEmailIds),
             .insertedEmailIds = std::move(insertedEmailIds),
             .removedEmailIds = std::move(removedEmailIds),

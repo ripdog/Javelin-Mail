@@ -36,6 +36,7 @@ namespace javelin::jmap::sync
         std::optional<MailboxRefreshWindowSummary> canonicalWindow;
         bool usedIncrementalRefresh = false;
         bool canonicalWindowMaterialized = false;
+        bool requiresFullRefresh = false;
         bool superseded = false;
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
@@ -48,12 +49,14 @@ namespace javelin::jmap::sync
     [[nodiscard]] std::optional<OperationError>
     rebaseActiveEmailProjections(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                  std::string_view accountId, std::vector<std::string> emailIds,
-                                 std::string_view serverState);
+                                 std::string_view serverState,
+                                 MailCommitEffects* reconciliationEffects = nullptr);
     [[nodiscard]] std::optional<OperationError>
     rebaseActiveEmailProjections(MutationProjectionTransaction& transaction,
                                  javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                  std::string_view accountId, std::vector<std::string> emailIds,
-                                 std::string_view serverState);
+                                 std::string_view serverState,
+                                 MailCommitEffects* reconciliationEffects = nullptr);
 
     // Owns mailbox query/window state only: Email/queryChanges, ordered membership and bounded
     // materialization. Email/get state observed while filling a window is not authority for the

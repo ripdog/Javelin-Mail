@@ -901,9 +901,9 @@ namespace javelin::jmap::sync
                         searchWindows.invalidateAccount(transaction.cacheTransaction(), accountId))
                     co_return operationError(*error);
             }
-            if (const auto error =
-                    rebaseActiveEmailProjections(transaction, databaseConnection, accountId,
-                                                 std::move(changedEmailIds), snapshot.state))
+            if (const auto error = rebaseActiveEmailProjections(
+                    transaction, databaseConnection, accountId, std::move(changedEmailIds),
+                    snapshot.state, &summary.effects))
                 co_return *error;
             if (const auto error = transaction.commit())
                 co_return operationError(*error);
@@ -967,6 +967,14 @@ namespace javelin::jmap::sync
                 mergeSummary(summary, std::get<MailDeltaRefreshSummary>(rebaseline));
                 if (summary.superseded)
                     co_return summary;
+
+                // Rebaseline is itself a durable Email transition. Return it before any mailbox
+                // delta network await so the coordinator can publish the commit immediately.
+                summary.continuation = MailDeltaRefreshRequest{
+                    .mailbox = mailboxState.has_value(),
+                    .email = false,
+                };
+                co_return summary;
             }
         }
         if (!mailboxState.has_value() && !emailState.has_value())
@@ -1450,9 +1458,9 @@ namespace javelin::jmap::sync
             changedIds.reserve(parsed.emails.size());
             for (const auto& email : parsed.emails)
                 changedIds.push_back(email.id);
-            if (const auto error = rebaseActiveEmailProjections(transaction, m_databaseConnection,
-                                                                accountId, std::move(changedIds),
-                                                                parsed.emailChanges->newState))
+            if (const auto error = rebaseActiveEmailProjections(
+                    transaction, m_databaseConnection, accountId, std::move(changedIds),
+                    parsed.emailChanges->newState, &summary.effects))
                 co_return *error;
             for (const auto& event : notificationEvents)
             {

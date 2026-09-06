@@ -822,6 +822,61 @@ TEST_CASE("recoverable Email gap preserves a valid Mailbox transition",
     CHECK(std::get<std::optional<javelin::jmap::domain::Mailbox>>(archive)->unreadEmails == 0);
 }
 
+TEST_CASE("missing Email cursor rebaseline returns before a failing Mailbox continuation",
+          "[jmap][sync][mail-delta][rebaseline][publication]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    REQUIRE_FALSE(states
+                      .upsert({.accountId = "account-1", .objectType = "Mailbox", .queryKey = {}},
+                              "mailbox-state-1")
+                      .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(rebaselineEmailResponse("email-state-baseline", {}));
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "forced mailbox continuation failure",
+    });
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+
+    const auto first =
+        QCoro::waitFor(executor.refresh("account-1", {.mailbox = true, .email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(first));
+    const auto& firstSummary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(first);
+    CHECK(firstSummary.continuation.mailbox);
+    CHECK_FALSE(firstSummary.continuation.email);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains("email-rebaseline-0"));
+    CHECK_FALSE(transport.requests.front().body.contains("\"Mailbox/changes\""));
+
+    const auto installed =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(installed));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(installed).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(installed)->stateToken ==
+          "email-state-baseline");
+
+    const auto second = QCoro::waitFor(executor.refresh("account-1", firstSummary.continuation));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(second));
+    REQUIRE(transport.requests.size() == 2);
+    CHECK(transport.requests.back().body.contains("\"Mailbox/changes\""));
+
+    const auto retained =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(retained));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(retained).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(retained)->stateToken ==
+          "email-state-baseline");
+}
+
 TEST_CASE("account Email rebaseline reconciles cached mail before advancing state",
           "[jmap][sync][mail-delta][rebaseline]")
 {
@@ -1699,6 +1754,71 @@ TEST_CASE("account Email delta suppresses server confirmation of local mailbox o
             std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pendingResult)
                 .empty());
     }
+}
+
+TEST_CASE("reconciled unknown mailbox move publishes remote offline catch-up effects",
+          "[jmap][sync][mail-delta][mutation][offline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes
+                      .upsertMany("account-1",
+                                  {mailbox("inbox", 0, "inbox"), mailbox("archive", 1, "archive")})
+                      .has_value());
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {})}).has_value());
+
+    javelin::jmap::sync::EmailMutationJournal journal{database.connection};
+    REQUIRE_FALSE(journal
+                      .put({
+                          .mutationId = "lost-move",
+                          .operationGroupId = std::nullopt,
+                          .accountId = "account-1",
+                          .status = javelin::jmap::sync::MutationStatus::Unknown,
+                          .patch =
+                              {
+                                  .emailId = "email-1",
+                                  .addMailboxIds = {"archive"},
+                                  .removeMailboxIds = {"inbox"},
+                                  .addKeywords = {},
+                                  .removeKeywords = {},
+                                  .destroy = false,
+                              },
+                          .baseMailboxIds = std::vector<std::string>{"inbox"},
+                          .baseKeywords = std::vector<std::string>{},
+                          .baseState = "email-state-1",
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    transport.queuedResults.push_back(
+        updatedEmailResponseAtState("email-state-2", {"archive"}, false));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK(summary.effects.mailboxMembershipChanged);
+    CHECK(std::ranges::find(summary.effects.affectedMailboxIds, "inbox") !=
+          summary.effects.affectedMailboxIds.end());
+    CHECK(std::ranges::find(summary.effects.affectedMailboxIds, "archive") !=
+          summary.effects.affectedMailboxIds.end());
+
+    const auto remaining = journal.listActive("account-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(remaining));
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(remaining).empty());
 }
 
 TEST_CASE("account Email delta suppresses Javelin-imported created mail",

@@ -473,7 +473,7 @@ namespace javelin::app
                 }
                 if (const auto rebaseError = javelin::jmap::sync::rebaseActiveEmailProjections(
                         transaction, m_databaseConnection, target.accountId, committedEmailIds,
-                        response.state))
+                        response.state, &effects))
                     co_return *rebaseError;
                 if (membershipRace)
                 {

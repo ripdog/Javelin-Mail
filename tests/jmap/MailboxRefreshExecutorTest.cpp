@@ -1673,16 +1673,25 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
     javelin::jmap::api::MethodCaller methodCaller{transport};
     javelin::jmap::sync::MailboxRefreshExecutor executor{databaseContext.connection, methodCaller,
                                                          makeRequestContext()};
-    const auto result =
+    const auto incrementalResult =
         QCoro::waitFor(executor.refreshCollapsedMailbox("account-1", "mbx-inbox", {}));
 
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(incrementalResult));
+    const auto& incrementalSummary =
+        std::get<javelin::jmap::sync::MailboxRefreshSummary>(incrementalResult);
+    CHECK(incrementalSummary.requiresFullRefresh);
+    CHECK_FALSE(incrementalSummary.canonicalWindow.has_value());
+    CHECK(incrementalSummary.changedEmailIds.empty());
+    CHECK(incrementalSummary.insertedEmailIds == std::vector<std::string>{"eml-new"});
+    CHECK(incrementalSummary.removedEmailIds == std::vector<std::string>{"eml-removed"});
+    REQUIRE(transport.requests.size() == 2);
+
+    const auto result =
+        QCoro::waitFor(executor.refreshCollapsedMailbox("account-1", "mbx-inbox", {}, true));
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
+    CHECK_FALSE(summary.requiresFullRefresh);
     CHECK(summary.representativeCount == 1);
-    CHECK_FALSE(summary.usedIncrementalRefresh);
-    CHECK(summary.changedEmailIds.empty());
-    CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-new"});
-    CHECK(summary.removedEmailIds == std::vector<std::string>{"eml-removed"});
     REQUIRE(transport.requests.size() == 3);
     const auto removedResult = emailRepository.find("account-1", "eml-removed");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(removedResult));

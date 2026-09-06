@@ -12,6 +12,7 @@
 #include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 
 #include <QCoroTask>
@@ -100,6 +101,7 @@ namespace
         std::size_t transientEmailFailuresRemaining = 0;
         std::size_t recoverableEmailGapsRemaining = 0;
         bool nextEmailDeltaCreatesPagedNotification = false;
+        bool nextEmailDeltaConfirmsUnknownMove = false;
         bool failPagedEmailContinuation = false;
         bool notificationCommittedBeforePresentation = false;
 
@@ -139,6 +141,12 @@ namespace
                 emailDelta && nextEmailDeltaCreatesPagedNotification;
             if (pagedNotificationDelta)
                 nextEmailDeltaCreatesPagedNotification = false;
+            const bool unknownMoveDelta = emailDelta && nextEmailDeltaConfirmsUnknownMove;
+            if (unknownMoveDelta)
+            {
+                nextEmailDeltaConfirmsUnknownMove = false;
+                m_unknownMoveFetchPending = true;
+            }
             const bool recoverableEmailGap = emailDelta && recoverableEmailGapsRemaining > 0;
             if (recoverableEmailGap)
                 --recoverableEmailGapsRemaining;
@@ -159,10 +167,12 @@ namespace
             }
 
             const bool createsNotification = emailDelta && !recoverableEmailGap &&
+                                             !unknownMoveDelta &&
                                              (pagedNotificationDelta || successfulEmailDeltas == 1);
             const std::string createdEmailId =
                 pagedNotificationDelta ? "email-page-one" : "email-new";
             const std::string emailState = pagedNotificationDelta ? "email-state-page-one"
+                                           : unknownMoveDelta     ? "email-state-move"
                                            : createsNotification  ? "email-state-2"
                                                                   : m_emailState;
             javelin::jmap::api::ResponseEnvelope response;
@@ -195,7 +205,8 @@ namespace
                             R"(","newState":")" + emailState + R"(","hasMoreChanges":)" +
                             (pagedNotificationDelta ? "true" : "false") + R"(,"created":[)" +
                             (createsNotification ? "\"" + createdEmailId + "\"" : "") +
-                            R"(],"updated":[],"destroyed":[]})";
+                            R"(],"updated":[)" + (unknownMoveDelta ? R"("email-move")" : "") +
+                            R"(],"destroyed":[]})";
                     }
                 }
                 else if (name == "Email/get")
@@ -211,8 +222,12 @@ namespace
                     const bool unknownPresentationFetch =
                         m_unknownEmailPending && (invocation.callId == "thread-ids-get" ||
                                                   invocation.callId == "updated-emails-get");
+                    const bool unknownMoveFetch =
+                        m_unknownMoveFetchPending && invocation.callId == "relevant-updated-emails";
                     const std::string objects =
-                        createsNotification && createdFetch
+                        unknownMoveFetch
+                            ? R"({"id":"email-move","blobId":"blob-move","threadId":"thread-move","mailboxIds":{"archive":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:02Z","subject":"Moved mail","preview":"Preview"})"
+                        : createsNotification && createdFetch
                             ? std::string{R"({"id":")"} + createdEmailId +
                                   R"(","blobId":"blob-new","threadId":"thread-new","mailboxIds":{"inbox":true},"keywords":{},"size":42,"receivedAt":"2026-08-29T00:00:00Z","subject":"New mail","preview":"Preview"})"
                         : unknownPresentationFetch
@@ -223,6 +238,8 @@ namespace
                                 R"(","list":[)" + objects + R"(],"notFound":[]})";
                     if (unknownPresentationFetch)
                         m_unknownEmailPending = false;
+                    if (unknownMoveFetch)
+                        m_unknownMoveFetchPending = false;
                 }
                 else if (name == "Email/query")
                 {
@@ -272,6 +289,7 @@ namespace
         std::string m_queryState;
         std::size_t m_queryGeneration = 0;
         bool m_unknownEmailPending = false;
+        bool m_unknownMoveFetchPending = false;
     };
 
     class CoordinatorQueryRefreshPort final : public javelin::app::MailQueryRefreshPort
@@ -308,22 +326,31 @@ namespace
                     },
             };
             javelin::jmap::sync::MailboxRefreshExecutor executor{m_connection, caller, context};
-            const auto result = co_await executor.refreshCollapsedMailbox(accountId, mailboxId, {},
-                                                                          false, accountId);
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                co_return *error;
-            const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
-            if (summary.superseded)
+            bool forceFullRefresh = false;
+            bool cacheChanged = false;
+            while (true)
             {
-                co_return javelin::jmap::OperationError{
-                    .code = javelin::jmap::OperationErrorCode::Conflict,
-                    .message = QStringLiteral("The test mailbox refresh was superseded."),
-                };
+                const auto result = co_await executor.refreshCollapsedMailbox(
+                    accountId, mailboxId, {}, forceFullRefresh, accountId);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                    co_return *error;
+                const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
+                if (summary.superseded)
+                {
+                    co_return javelin::jmap::OperationError{
+                        .code = javelin::jmap::OperationErrorCode::Conflict,
+                        .message = QStringLiteral("The test mailbox refresh was superseded."),
+                    };
+                }
+                cacheChanged = cacheChanged || summary.canonicalWindowMaterialized ||
+                               !summary.changedEmailIds.empty() ||
+                               summary.effects.emailObjectsChanged;
+                if (!summary.requiresFullRefresh)
+                    co_return javelin::app::CanonicalMailboxRefreshSummary{
+                        .cacheChanged = cacheChanged,
+                    };
+                forceFullRefresh = true;
             }
-            co_return javelin::app::CanonicalMailboxRefreshSummary{
-                .cacheChanged =
-                    summary.canonicalWindowMaterialized || !summary.changedEmailIds.empty(),
-            };
         }
 
       private:
@@ -707,6 +734,89 @@ TEST_CASE("calendar alert push routes independently of collection state",
     CHECK(eventId == QStringLiteral("event-1"));
     CHECK(recurrenceId == QStringLiteral("2026-09-03T09:00:00"));
     CHECK(alertId == QStringLiteral("alert-1"));
+}
+
+TEST_CASE("lost-response move confirmation schedules offline catch-up for both mailboxes",
+          "[app][account][sync][mutation][offline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    javelin::jmap::cache::MailboxRepository mailboxes{fixture.connection};
+    REQUIRE_FALSE(mailboxes
+                      .upsertMany("account-1", {{.id = "archive",
+                                                 .name = "Archive",
+                                                 .parentId = std::nullopt,
+                                                 .role = "archive",
+                                                 .sortOrder = 0,
+                                                 .totalEmails = 1,
+                                                 .unreadEmails = 0,
+                                                 .totalThreads = 1,
+                                                 .unreadThreads = 0,
+                                                 .isSubscribed = true,
+                                                 .myRights = {}}})
+                      .has_value());
+    javelin::jmap::cache::EmailRepository emails{fixture.connection};
+    javelin::jmap::domain::Email movedEmail;
+    movedEmail.id = "email-move";
+    movedEmail.blobId = "blob-move";
+    movedEmail.threadId = "thread-move";
+    movedEmail.mailboxIds = {"archive"};
+    movedEmail.size = 42;
+    movedEmail.receivedAt = "2026-08-29T00:00:02Z";
+    movedEmail.subject = "Moved mail";
+    movedEmail.preview = "Preview";
+    REQUIRE_FALSE(emails.upsertMany("account-1", {movedEmail}).has_value());
+    javelin::jmap::sync::EmailMutationJournal journal{fixture.connection};
+    REQUIRE_FALSE(journal
+                      .put({
+                          .mutationId = "lost-move",
+                          .operationGroupId = std::nullopt,
+                          .accountId = "account-1",
+                          .status = javelin::jmap::sync::MutationStatus::Unknown,
+                          .patch =
+                              {
+                                  .emailId = "email-move",
+                                  .addMailboxIds = {"archive"},
+                                  .removeMailboxIds = {"inbox"},
+                                  .addKeywords = {},
+                                  .removeKeywords = {},
+                                  .destroy = false,
+                              },
+                          .baseMailboxIds = std::vector<std::string>{"inbox"},
+                          .baseKeywords = std::vector<std::string>{},
+                          .baseState = "email-state-1",
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+
+    QStringList scheduledMailboxes;
+    QObject::connect(&fixture.coordinator, &javelin::app::AccountSyncCoordinator::cacheCommitted,
+                     [&scheduledMailboxes](const javelin::app::MailCacheChange& change)
+                     {
+                         if (!change.background.offlineCatchUp.empty())
+                             scheduledMailboxes = change.background.offlineCatchUp.mailboxIds;
+                     });
+
+    fixture.transport.nextEmailDeltaConfirmsUnknownMove = true;
+    REQUIRE(fixture.coordinator.requestSynchronization());
+    REQUIRE(waitUntil([&scheduledMailboxes]
+                      { return scheduledMailboxes.contains(QStringLiteral("archive")); }));
+    CHECK(scheduledMailboxes.contains(QStringLiteral("inbox")));
+    CHECK(scheduledMailboxes.contains(QStringLiteral("archive")));
+
+    const auto remaining = journal.listActive("account-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(remaining));
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(remaining).empty());
 }
 
 TEST_CASE("lost account Email history reconciles every tracked mailbox query",
