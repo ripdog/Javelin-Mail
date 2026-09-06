@@ -165,7 +165,7 @@ namespace javelin::app
             const auto& background = change.background;
             if (background.vaultProjectionWorkQueued)
                 m_services.localMaintenanceService().requestReplay();
-            if (!change.optimisticProjection && !background.offlineCatchUp.empty())
+            if (!background.offlineCatchUp.empty())
             {
                 if (background.offlineCatchUp.accountWide)
                 {

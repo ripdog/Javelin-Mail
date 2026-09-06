@@ -255,56 +255,6 @@ namespace javelin::app
             return mailboxIds;
         }
 
-        [[nodiscard]] QStringList membershipMailboxIdsForPendingMutations(
-            javelin::jmap::cache::DatabaseConnection& connection, const std::string_view accountId,
-            const std::optional<std::string>& operationGroupId, const std::size_t limit)
-        {
-            javelin::jmap::sync::EmailMutationJournal journal{connection};
-            auto recordsResult =
-                operationGroupId.has_value()
-                    ? journal.listPendingForOperationGroup(accountId, *operationGroupId, limit)
-                    : journal.listByStatus(accountId, javelin::jmap::sync::MutationStatus::Pending,
-                                           limit);
-            const auto* records =
-                std::get_if<std::vector<javelin::jmap::sync::EmailMutationRecord>>(&recordsResult);
-            if (records == nullptr)
-                return {};
-
-            QStringList mailboxIds;
-            const auto append = [&mailboxIds](const auto& values)
-            {
-                for (const auto& value : values)
-                {
-                    const auto mailboxId = QString::fromStdString(value);
-                    if (!mailboxIds.contains(mailboxId))
-                        mailboxIds.push_back(mailboxId);
-                }
-            };
-            for (const auto& record : *records)
-            {
-                if (!record.patch.destroy && record.patch.addMailboxIds.empty() &&
-                    record.patch.removeMailboxIds.empty())
-                {
-                    continue;
-                }
-                append(record.patch.addMailboxIds);
-                append(record.patch.removeMailboxIds);
-                if (record.baseMailboxIds.has_value())
-                    append(*record.baseMailboxIds);
-            }
-            return mailboxIds;
-        }
-
-        [[nodiscard]] MailBackgroundEffects
-        mailboxMembershipBackgroundEffects(const QStringList& mailboxIds)
-        {
-            MailBackgroundEffects background;
-            for (const auto& mailboxId : mailboxIds)
-                background.offlineCatchUp.addMailbox(mailboxId);
-            background.vaultProjectionWorkQueued = !background.offlineCatchUp.empty();
-            return background;
-        }
-
         class ForegroundWorkScope final
         {
           public:
@@ -2138,29 +2088,6 @@ namespace javelin::app
                 co_return QueryAdmissionSuperseded{};
             m_errorCoordinator.reportSuccess(configuration->connectionId);
 
-            javelin::jmap::cache::MailboxWindowRepository windows{m_databaseConnection};
-            const auto cachedResult = windows.find(intent.accountId, queryKey, 0, 100);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResult))
-                co_return javelin::jmap::operationError(*error);
-            const auto& cached =
-                std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(cachedResult);
-            if (!cached.has_value())
-            {
-                co_return javelin::jmap::OperationError{
-                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
-                    .message = QStringLiteral(
-                        "Canonical mailbox refresh did not materialize its query window."),
-                };
-            }
-
-            if (m_threadMaterializationCoordinator != nullptr)
-            {
-                if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
-                        intent.accountId, queryKey, 0, 100, WorkPriority::VisibleMaterialization))
-                    qWarning().noquote() << "Could not enqueue refreshed mailbox Thread "
-                                            "materialization"
-                                         << error->message;
-            }
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(intent.accountId),
                 .mailboxIds = {QString::fromStdString(intent.mailboxId)},
@@ -2169,22 +2096,39 @@ namespace javelin::app
                     .queryKey = QString::fromStdString(queryKey),
                     .offset = 0,
                     .limit = 100,
-                    .total = cached->total,
+                    .total = refresh.canonicalWindow.has_value() ? refresh.canonicalWindow->total
+                                                                 : std::nullopt,
                 }},
                 .searchWindows = {},
                 .emailObjectsChanged = refresh.effects.emailObjectsChanged,
                 .background = backgroundEffects(refresh.effects),
             });
+            if (!refresh.canonicalWindow.has_value())
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = QStringLiteral(
+                        "Canonical mailbox refresh did not return its committed query window."),
+                };
+            }
+            if (m_threadMaterializationCoordinator != nullptr)
+            {
+                if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                        intent.accountId, queryKey, 0, 100, WorkPriority::VisibleMaterialization))
+                    qWarning().noquote() << "Could not enqueue refreshed mailbox Thread "
+                                            "materialization"
+                                         << error->message;
+            }
             co_return MailboxWindowSummary{
                 .accountId = intent.accountId,
                 .mailboxId = intent.mailboxId,
                 .offset = 0,
                 .limit = 100,
-                .position = cached->position,
-                .returnedLimit = cached->returnedLimit,
-                .representativeCount = cached->emailIds.size(),
-                .total = cached->total,
-                .queryState = cached->queryState,
+                .position = refresh.canonicalWindow->position,
+                .returnedLimit = refresh.canonicalWindow->returnedLimit,
+                .representativeCount = refresh.canonicalWindow->representativeCount,
+                .total = refresh.canonicalWindow->total,
+                .queryState = refresh.canonicalWindow->queryState,
             };
         }
 
@@ -3557,7 +3501,7 @@ namespace javelin::app
             .mailboxTreeChanged = false,
             .emailObjectsChanged = false,
             .optimisticProjection = true,
-            .background = mailboxMembershipBackgroundEffects(membershipMailboxIds),
+            .background = {.vaultProjectionWorkQueued = !membershipMailboxIds.empty()},
         });
         return result;
     }
@@ -3591,7 +3535,6 @@ namespace javelin::app
                                                 ? std::numeric_limits<std::size_t>::max()
                                                 : pendingEmailMutationBatchSize));
         QStringList affectedMailboxIds;
-        QStringList membershipMailboxIds;
         EmailMutationBatchSubmission groupedSubmission;
         if (operationGroupId.has_value())
         {
@@ -3606,18 +3549,11 @@ namespace javelin::app
                     for (const auto& mailboxId : batchMailboxIds)
                         if (!affectedMailboxIds.contains(mailboxId))
                             affectedMailboxIds.push_back(mailboxId);
-                    const auto batchMembershipIds = membershipMailboxIdsForPendingMutations(
-                        m_databaseConnection, accountId, operationGroupId, batchLimit);
-                    for (const auto& mailboxId : batchMembershipIds)
-                        if (!membershipMailboxIds.contains(mailboxId))
-                            membershipMailboxIds.push_back(mailboxId);
                 });
         }
         else
         {
             affectedMailboxIds = affectedMailboxIdsForPendingMutations(
-                m_databaseConnection, accountId, operationGroupId, batchLimit);
-            membershipMailboxIds = membershipMailboxIdsForPendingMutations(
                 m_databaseConnection, accountId, operationGroupId, batchLimit);
             auto single = co_await m_emailMutationEngine.submitPending(
                 toLiveConnectionSettings(configuration->second.settings), accountId,
@@ -3693,8 +3629,18 @@ namespace javelin::app
         auto observed =
             observeResult(m_errorCoordinator, configuration->second.settings, accountId,
                           QStringLiteral("Submit pending mail changes"), std::move(result));
-        if (submittedAll.attemptedEmailCount > 0)
+        if (submittedAll.attemptedEmailCount > 0 ||
+            (groupedSubmission.error.has_value() && !affectedMailboxIds.empty()))
         {
+            auto background = backgroundEffects(submittedAll.settlementEffects);
+            // A rejection can roll back an optimistic mailbox projection without representing a
+            // remote membership change. Keep that local vault repair independent from offline
+            // catch-up. Error results are conservative here because method-level rejection may
+            // have committed the rollback before returning the error.
+            background.vaultProjectionWorkQueued = background.vaultProjectionWorkQueued ||
+                                                   submittedAll.vaultProjectionWorkQueued ||
+                                                   groupedSubmission.error.has_value();
+            background.mailboxCountsChanged = submittedAll.mailboxCountsChanged;
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(accountId),
                 .mailboxIds = std::move(affectedMailboxIds),
@@ -3703,7 +3649,7 @@ namespace javelin::app
                 .mailboxTreeChanged = false,
                 .emailObjectsChanged = false,
                 .optimisticProjection = true,
-                .background = mailboxMembershipBackgroundEffects(membershipMailboxIds),
+                .background = std::move(background),
             });
         }
         co_return observed;

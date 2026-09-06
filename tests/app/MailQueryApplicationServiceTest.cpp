@@ -18,6 +18,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
 #include <QCoroTimer>
@@ -380,6 +381,10 @@ TEST_CASE("canonical background and foreground mailbox demand share one request"
 
     std::optional<javelin::app::CanonicalMailboxRefreshResult> backgroundResult;
     std::optional<javelin::app::MailboxWindowResult> foregroundResult;
+    std::vector<javelin::app::MailCacheChange> changes;
+    QObject::connect(&fixture.service, &javelin::app::MailQueryApplicationService::cacheCommitted,
+                     &fixture.service, [&changes](javelin::app::MailCacheChange change)
+                     { changes.push_back(std::move(change)); });
     auto background = fixture.service.refreshCanonicalMailbox("account-1", "inbox");
     QCoro::connect(std::move(background), &fixture.service,
                    [&backgroundResult](javelin::app::CanonicalMailboxRefreshResult result)
@@ -395,7 +400,20 @@ TEST_CASE("canonical background and foreground mailbox demand share one request"
         waitUntil([&] { return backgroundResult.has_value() && foregroundResult.has_value(); }));
     CHECK(fixture.methodTransport.emailQueryCalls == 1);
     CHECK(std::holds_alternative<javelin::app::CanonicalMailboxRefreshSummary>(*backgroundResult));
-    CHECK(std::holds_alternative<javelin::app::MailboxWindowSummary>(*foregroundResult));
+    REQUIRE(std::holds_alternative<javelin::app::MailboxWindowSummary>(*foregroundResult));
+    REQUIRE(changes.size() == 1);
+    REQUIRE(changes.front().queryWindows.size() == 1);
+    CHECK(changes.front().queryWindows.front().queryKey ==
+          QString::fromStdString(javelin::jmap::sync::mailboxQueryKey({
+              .mailboxId = "inbox",
+              .sortProperty = "receivedAt",
+              .isAscending = false,
+              .collapseThreads = true,
+          })));
+    CHECK(changes.front().queryWindows.front().total == std::optional<std::size_t>{101});
+    const auto& summary = std::get<javelin::app::MailboxWindowSummary>(*foregroundResult);
+    CHECK(summary.total == std::optional<std::size_t>{101});
+    CHECK(summary.representativeCount == 1);
 }
 
 TEST_CASE("mail query admission merges explicit refreshes into one follow-up request",

@@ -27,6 +27,9 @@ namespace javelin::app
                     .failedEmailCount = 0,
                     .statePreconditionUsed = false,
                     .items = {},
+                    .settlementEffects = {},
+                    .vaultProjectionWorkQueued = false,
+                    .mailboxCountsChanged = false,
                     .receipt = {},
                 },
             .error = std::nullopt,
@@ -57,6 +60,12 @@ namespace javelin::app
             submitted.items.insert(submitted.items.end(),
                                    std::make_move_iterator(batch.items.begin()),
                                    std::make_move_iterator(batch.items.end()));
+            javelin::jmap::sync::mergeMailCommitEffects(submitted.settlementEffects,
+                                                        batch.settlementEffects);
+            submitted.vaultProjectionWorkQueued =
+                submitted.vaultProjectionWorkQueued || batch.vaultProjectionWorkQueued;
+            submitted.mailboxCountsChanged =
+                submitted.mailboxCountsChanged || batch.mailboxCountsChanged;
             submitted.receipt.acceptedObjectIds.insert(
                 submitted.receipt.acceptedObjectIds.end(),
                 std::make_move_iterator(batch.receipt.acceptedObjectIds.begin()),

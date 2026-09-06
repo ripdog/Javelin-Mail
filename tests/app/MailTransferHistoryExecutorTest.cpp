@@ -108,6 +108,9 @@ namespace
                            .accepted = accepted,
                            .error =
                                accepted ? std::nullopt : std::optional<std::string>{"rejected"}}},
+                .settlementEffects = {},
+                .vaultProjectionWorkQueued = false,
+                .mailboxCountsChanged = false,
                 .receipt = {},
             };
         }

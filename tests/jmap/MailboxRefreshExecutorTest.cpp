@@ -389,6 +389,8 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
     CHECK(summary.representativeCount == 1);
+    REQUIRE(summary.canonicalWindow.has_value());
+    CHECK(summary.canonicalWindow->representativeCount == 1);
     CHECK_FALSE(summary.usedIncrementalRefresh);
     CHECK(summary.canonicalWindowMaterialized);
     CHECK(summary.changedEmailIds.empty());
@@ -1049,6 +1051,8 @@ TEST_CASE("mailbox query refresh does not own account Email deltas",
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
     CHECK(summary.representativeCount == 500);
+    REQUIRE(summary.canonicalWindow.has_value());
+    CHECK(summary.canonicalWindow->total == std::optional<std::size_t>{500});
     CHECK(summary.usedIncrementalRefresh);
     CHECK(summary.changedEmailIds.empty());
     CHECK(summary.insertedEmailIds.empty());

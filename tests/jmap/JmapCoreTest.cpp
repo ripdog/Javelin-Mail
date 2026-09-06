@@ -2,6 +2,7 @@
 #include "jmap/api/SessionRefreshClient.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -774,6 +775,130 @@ TEST_CASE("MailQueryMaterializer rejects a delayed page after a newer Email delt
     REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(retained).has_value());
     CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(retained)->subject ==
           "Newer delta");
+}
+
+TEST_CASE("MailQueryMaterializer rejects a delayed page after Email mutation settlement",
+          "[jmap][query][ordering][mail-cache-revision][mutation]")
+{
+    ensureApplication();
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto database = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    FakeTransport queryTransport;
+    queryTransport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(
+            javelin::tests::loadFixture("jmap/session/websocket_session.json")),
+    });
+    javelin::jmap::api::HttpJmapMethodTransport queryMethodTransport{queryTransport};
+    javelin::jmap::SessionRefreshClient sessionRefresh{database, queryTransport};
+    javelin::jmap::MailQueryClient queryClient{database, queryMethodTransport};
+    javelin::jmap::MailQueryMaterializer queryMaterializer{database, queryClient};
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://mail.example.com/.well-known/jmap",
+        .loginEmail = "alice@example.com",
+        .apiKey = "access-token",
+    };
+    REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(
+        QCoro::waitFor(sessionRefresh.refresh(settings, "connection-1", "u1", "u1"))));
+
+    javelin::jmap::domain::Email cached;
+    cached.id = "eml-1";
+    cached.blobId = "blob-1";
+    cached.threadId = "thr-123";
+    cached.mailboxIds = {"mbx-inbox"};
+    cached.keywords = {"$seen"};
+    cached.size = 1;
+    cached.receivedAt = "2026-04-05T11:22:33Z";
+    cached.subject = "Before mutation";
+    cached.preview = "Before mutation";
+    javelin::jmap::cache::EmailRepository emails{database};
+    REQUIRE_FALSE(emails.upsertMany("u1", {cached}).has_value());
+    javelin::jmap::cache::SyncStateRepository states{database};
+    REQUIRE_FALSE(
+        states.upsert({.accountId = "u1", .objectType = "Email", .queryKey = {}}, "email-state-1")
+            .has_value());
+
+    FakeTransport mutationTransport;
+    mutationTransport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    {.name = "Email/set",
+                     .arguments =
+                         R"({"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}})",
+                     .callId = "queued-email-set"},
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-2",
+        })),
+    });
+    javelin::jmap::api::HttpJmapMethodTransport mutationMethodTransport{mutationTransport};
+    javelin::jmap::EmailMutationEngine mutationEngine{database, mutationMethodTransport};
+    const auto queued =
+        mutationEngine.queue("u1", {.emailId = "eml-1", .addKeywords = {"project-test"}});
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+
+    const auto staleEmail = emailFixtureWithIdentity("eml-1", "thr-123");
+    queryTransport.queuedResults
+        .push_back(
+            javelin::jmap::api::HttpResponse{
+                .statusCode = 200,
+                .body =
+                    QByteArray::fromStdString(
+                        serializeResponseEnvelope(
+                            {
+                                .methodResponses =
+                                    {
+                                        {.name = "Email/query",
+                                         .arguments =
+                                             R"({"accountId":"u1","queryState":"query-stale","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1,"limit":100})",
+                                         .callId = "page-query"},
+                                        {.name = "Email/get",
+                                         .arguments =
+                                             emailGetArguments("u1", "email-state-1", staleEmail),
+                                         .callId = "page-representatives-get"},
+                                        {.name = "Thread/get",
+                                         .arguments =
+                                             R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                                         .callId = "page-threads-get"},
+                                        {.name = "Email/get",
+                                         .arguments =
+                                             emailGetArguments("u1", "email-state-1", staleEmail),
+                                         .callId = "page-emails-get"},
+                                    },
+                                .createdIds = std::nullopt,
+                                .sessionState = "session-state-2",
+                            })),
+            });
+
+    queryTransport.onSend = [&](const std::size_t requestNumber)
+    {
+        if (requestNumber != 2)
+            return;
+        const auto settled = QCoro::waitFor(mutationEngine.submitPending(settings, "u1"));
+        REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(settled));
+        CHECK(std::get<javelin::jmap::SubmittedEmailMutations>(settled).updatedEmailCount == 1);
+    };
+
+    const auto result =
+        QCoro::waitFor(queryMaterializer.queryMailboxPage(settings, "u1", "mbx-inbox", 0, 100));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailQueryMaterializationSuperseded>(result));
+
+    const auto retained = emails.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(retained));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(retained).has_value());
+    CHECK(std::ranges::contains(
+        std::get<std::optional<javelin::jmap::domain::Email>>(retained)->keywords,
+        std::string{"project-test"}));
 }
 
 TEST_CASE("MailQueryMaterializer collapsed page materializes representatives within get limits",

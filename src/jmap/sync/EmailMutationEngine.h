@@ -4,6 +4,7 @@
 #include "jmap/OperationError.h"
 #include "jmap/api/LiveConnectionSettings.h"
 #include "jmap/domain/MailEntities.h"
+#include "jmap/sync/MailCommitEffects.h"
 #include "jmap/sync/MutationCommitReceipt.h"
 
 #include <QCoroTask>
@@ -45,6 +46,12 @@ namespace javelin::jmap
         std::size_t failedEmailCount = 0;
         bool statePreconditionUsed = false;
         std::vector<Item> items;
+        // Remote effects describe server-accepted Email changes only. Local rollback projection
+        // maintenance is tracked separately so a rejected optimistic move cannot schedule remote
+        // offline catch-up.
+        javelin::jmap::sync::MailCommitEffects settlementEffects;
+        bool vaultProjectionWorkQueued = false;
+        bool mailboxCountsChanged = false;
         javelin::jmap::sync::MutationCommitReceipt receipt;
     };
 

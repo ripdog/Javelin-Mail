@@ -21,9 +21,19 @@
 namespace javelin::jmap::sync
 {
 
+    struct MailboxRefreshWindowSummary
+    {
+        std::size_t position = 0;
+        std::size_t returnedLimit = 0;
+        std::optional<std::size_t> total;
+        std::string queryState;
+        std::size_t representativeCount = 0;
+    };
+
     struct MailboxRefreshSummary
     {
         std::size_t representativeCount = 0;
+        std::optional<MailboxRefreshWindowSummary> canonicalWindow;
         bool usedIncrementalRefresh = false;
         bool canonicalWindowMaterialized = false;
         bool superseded = false;

@@ -2178,6 +2178,9 @@ namespace javelin::jmap
                 .failedEmailCount = 0,
                 .statePreconditionUsed = false,
                 .items = {},
+                .settlementEffects = {},
+                .vaultProjectionWorkQueued = false,
+                .mailboxCountsChanged = false,
                 .receipt = {},
             };
         }
@@ -2417,6 +2420,11 @@ namespace javelin::jmap
             auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
                 std::move(transactionResult));
             javelin::jmap::cache::EmailRepository emails{*m_impl->databaseConnection};
+            javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{
+                *m_impl->databaseConnection};
+            if (const auto error =
+                    cacheRevisions.advance(transaction.cacheTransaction(), accountId))
+                return javelin::jmap::operationError(*error);
             for (const auto& [emailId, projectedEmail] : mergedEmails)
             {
                 const auto actions = mutationsByEmailId.find(emailId);
@@ -2558,6 +2566,50 @@ namespace javelin::jmap
         std::unordered_set<std::string> failedEmailIds{parsed.notUpdated.begin(),
                                                        parsed.notUpdated.end()};
         failedEmailIds.insert(parsed.notDestroyed.begin(), parsed.notDestroyed.end());
+
+        javelin::jmap::sync::MailCommitEffects settlementEffects;
+        bool vaultProjectionWorkQueued = false;
+        for (const auto& [emailId, actions] : mutationsByEmailId)
+        {
+            const bool accepted =
+                updatedEmailIds.contains(emailId) || destroyedEmailIds.contains(emailId);
+            const bool rejected = failedEmailIds.contains(emailId);
+            if (!accepted && !rejected)
+                continue;
+
+            const bool membershipChanged =
+                std::ranges::any_of(actions,
+                                    [](const auto& action)
+                                    {
+                                        return action.patch.destroy ||
+                                               !action.patch.addMailboxIds.empty() ||
+                                               !action.patch.removeMailboxIds.empty();
+                                    });
+            if (rejected && membershipChanged)
+                vaultProjectionWorkQueued = true;
+            if (!accepted)
+                continue;
+
+            settlementEffects.emailObjectsChanged = true;
+            if (!membershipChanged)
+                continue;
+
+            settlementEffects.mailboxMembershipChanged = true;
+            if (destroyedEmailIds.contains(emailId))
+                settlementEffects.sourceIdentityChanged = true;
+            for (const auto& action : actions)
+            {
+                if (action.baseMailboxIds.has_value())
+                {
+                    for (const auto& mailboxId : *action.baseMailboxIds)
+                        javelin::jmap::sync::appendAffectedMailboxId(settlementEffects, mailboxId);
+                }
+                for (const auto& mailboxId : action.patch.addMailboxIds)
+                    javelin::jmap::sync::appendAffectedMailboxId(settlementEffects, mailboxId);
+                for (const auto& mailboxId : action.patch.removeMailboxIds)
+                    javelin::jmap::sync::appendAffectedMailboxId(settlementEffects, mailboxId);
+            }
+        }
         if (!parsed.notDestroyed.empty())
         {
             qWarning().noquote() << "Email/set permanent deletion rejected for ids"
@@ -2574,6 +2626,15 @@ namespace javelin::jmap
         }
         auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
             std::move(transactionResult));
+
+        if (!updatedEmailIds.empty() || !destroyedEmailIds.empty() || !failedEmailIds.empty())
+        {
+            javelin::jmap::sync::MailCacheRevisionRepository cacheRevisions{
+                *m_impl->databaseConnection};
+            if (const auto error =
+                    cacheRevisions.advance(transaction.cacheTransaction(), accountId))
+                co_return javelin::jmap::operationError(*error);
+        }
 
         if (!updatedEmailIds.empty() || !destroyedEmailIds.empty())
         {
@@ -2748,6 +2809,9 @@ namespace javelin::jmap
             .failedEmailCount = failedEmailIds.size(),
             .statePreconditionUsed = statePreconditionUsed,
             .items = std::move(items),
+            .settlementEffects = std::move(settlementEffects),
+            .vaultProjectionWorkQueued = vaultProjectionWorkQueued,
+            .mailboxCountsChanged = parsedMailboxes.has_value(),
             .receipt =
                 {
                     .domains =

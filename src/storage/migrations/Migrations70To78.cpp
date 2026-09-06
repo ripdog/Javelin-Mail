@@ -86,10 +86,11 @@ namespace javelin::jmap::cache::migrations
                             "revision=revision+1,updated_at=CURRENT_TIMESTAMP; END"),
                         QStringLiteral(
                             "CREATE TRIGGER mail_cache_revision_email_delete AFTER DELETE ON "
-                            "emails "
-                            "BEGIN INSERT INTO mail_cache_revisions(account_id,revision) "
-                            "VALUES(OLD.account_id,1) ON CONFLICT(account_id) DO UPDATE SET "
-                            "revision=revision+1,updated_at=CURRENT_TIMESTAMP; END"),
+                            "emails WHEN EXISTS(SELECT 1 FROM accounts WHERE "
+                            "account_id=OLD.account_id) BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
                         QStringLiteral(
                             "CREATE TRIGGER mail_cache_revision_mailbox_window_insert AFTER INSERT "
                             "ON mailbox_query_windows BEGIN INSERT INTO "
@@ -104,7 +105,8 @@ namespace javelin::jmap::cache::migrations
                             "updated_at=CURRENT_TIMESTAMP; END"),
                         QStringLiteral(
                             "CREATE TRIGGER mail_cache_revision_mailbox_window_delete AFTER DELETE "
-                            "ON mailbox_query_windows BEGIN INSERT INTO "
+                            "ON mailbox_query_windows WHEN EXISTS(SELECT 1 FROM accounts WHERE "
+                            "account_id=OLD.account_id) BEGIN INSERT INTO "
                             "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
                             "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
                             "updated_at=CURRENT_TIMESTAMP; END"),
@@ -122,7 +124,41 @@ namespace javelin::jmap::cache::migrations
                             "updated_at=CURRENT_TIMESTAMP; END"),
                         QStringLiteral(
                             "CREATE TRIGGER mail_cache_revision_search_window_delete AFTER DELETE "
-                            "ON search_windows BEGIN INSERT INTO "
+                            "ON search_windows WHEN EXISTS(SELECT 1 FROM accounts WHERE "
+                            "account_id=OLD.account_id) BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                    },
+            },
+            MigrationStep{
+                .version = 75,
+                .name = QStringLiteral("mail_cache_revision_safe_delete_triggers"),
+                .statements =
+                    {
+                        QStringLiteral("DROP TRIGGER IF EXISTS mail_cache_revision_email_delete"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_email_delete AFTER DELETE ON "
+                            "emails WHEN EXISTS(SELECT 1 FROM accounts WHERE "
+                            "account_id=OLD.account_id) BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "DROP TRIGGER IF EXISTS mail_cache_revision_mailbox_window_delete"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_mailbox_window_delete AFTER DELETE "
+                            "ON mailbox_query_windows WHEN EXISTS(SELECT 1 FROM accounts WHERE "
+                            "account_id=OLD.account_id) BEGIN INSERT INTO "
+                            "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
+                            "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
+                            "updated_at=CURRENT_TIMESTAMP; END"),
+                        QStringLiteral(
+                            "DROP TRIGGER IF EXISTS mail_cache_revision_search_window_delete"),
+                        QStringLiteral(
+                            "CREATE TRIGGER mail_cache_revision_search_window_delete AFTER DELETE "
+                            "ON search_windows WHEN EXISTS(SELECT 1 FROM accounts WHERE "
+                            "account_id=OLD.account_id) BEGIN INSERT INTO "
                             "mail_cache_revisions(account_id,revision) VALUES(OLD.account_id,1) ON "
                             "CONFLICT(account_id) DO UPDATE SET revision=revision+1,"
                             "updated_at=CURRENT_TIMESTAMP; END"),

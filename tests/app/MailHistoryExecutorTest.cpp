@@ -36,6 +36,9 @@ namespace
                 .failedEmailCount = 0,
                 .statePreconditionUsed = false,
                 .items = {},
+                .settlementEffects = {},
+                .vaultProjectionWorkQueued = false,
+                .mailboxCountsChanged = false,
                 .receipt = {},
             };
         std::vector<javelin::jmap::EmailMailboxMutation> queued;
@@ -224,6 +227,9 @@ TEST_CASE("mail history executor blocks mixed server outcomes as partial",
         .failedEmailCount = 1,
         .statePreconditionUsed = false,
         .items = {},
+        .settlementEffects = {},
+        .vaultProjectionWorkQueued = false,
+        .mailboxCountsChanged = false,
         .receipt = {},
     };
     MailHistoryExecutor executor{port};

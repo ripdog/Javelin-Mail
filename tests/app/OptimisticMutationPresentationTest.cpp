@@ -362,8 +362,7 @@ TEST_CASE("optimistic archive reaches mailbox sessions through daemon cache inva
     REQUIRE(mutationChanges.size() > moveChangesBefore);
     const auto& moveChange = mutationChanges.back();
     CHECK(moveChange.optimisticProjection);
-    CHECK(moveChange.background.offlineCatchUp.mailboxIds.contains(QStringLiteral("archive")));
-    CHECK(moveChange.background.offlineCatchUp.mailboxIds.contains(QStringLiteral("inbox")));
+    CHECK(moveChange.background.offlineCatchUp.empty());
     CHECK(moveChange.background.vaultProjectionWorkQueued);
     waitFor(
         [&]

@@ -815,6 +815,32 @@ namespace javelin::jmap::sync
 
         std::size_t representativeCount = 0;
         bool usedIncrementalRefresh = false;
+        std::optional<MailboxRefreshWindowSummary> committedCanonicalWindow;
+        const auto captureCanonicalWindow = [&]() -> std::optional<OperationError>
+        {
+            const auto windowResult =
+                canonicalWindows.find(accountId, canonicalQueryKey, 0, canonicalWindowLimit);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&windowResult))
+                return javelin::jmap::operationError(*error);
+            const auto& window =
+                std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
+            if (!window.has_value())
+            {
+                return OperationError{
+                    .code = OperationErrorCode::LocalStorageFailure,
+                    .message = QStringLiteral(
+                        "Mailbox refresh did not materialize its canonical query window."),
+                };
+            }
+            committedCanonicalWindow = MailboxRefreshWindowSummary{
+                .position = window->position,
+                .returnedLimit = window->returnedLimit,
+                .total = window->total,
+                .queryState = window->queryState,
+                .representativeCount = window->emailIds.size(),
+            };
+            return std::nullopt;
+        };
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
         std::vector<std::string> removedEmailIds;
@@ -936,6 +962,8 @@ namespace javelin::jmap::sync
                             incremental.windowAdditions, incremental.removedEmailIds,
                             incremental.representativeCount))
                         co_return javelin::jmap::operationError(*error);
+                    if (const auto error = captureCanonicalWindow())
+                        co_return *error;
                 }
                 if (const auto error = transaction.commit())
                     co_return javelin::jmap::operationError(*error);
@@ -1072,6 +1100,8 @@ namespace javelin::jmap::sync
                         .emailIds = fetch.representativeIds,
                     }))
                 co_return javelin::jmap::operationError(*error);
+            if (const auto error = captureCanonicalWindow())
+                co_return *error;
             if (const auto error = transaction.commit())
                 co_return javelin::jmap::operationError(*error);
 
@@ -1083,6 +1113,7 @@ namespace javelin::jmap::sync
 
         co_return MailboxRefreshSummary{
             .representativeCount = representativeCount,
+            .canonicalWindow = std::move(committedCanonicalWindow),
             .usedIncrementalRefresh = usedIncrementalRefresh,
             .canonicalWindowMaterialized = !usedIncrementalRefresh,
             .changedEmailIds = std::move(changedEmailIds),

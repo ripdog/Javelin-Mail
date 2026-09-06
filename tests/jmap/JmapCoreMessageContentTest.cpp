@@ -23,6 +23,7 @@
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
 #include "jmap/sync/MailboxMutationEngine.h"
 #include "jmap/sync/MailboxMutationJournal.h"
@@ -1575,7 +1576,7 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
         .body =
-            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"],["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":0,"unreadEmails":0,"totalThreads":0,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":false,"maySubmit":true}},{"id":"mbx-archive","name":"Archive","parentId":null,"role":"archive","sortOrder":20,"totalEmails":1,"unreadEmails":0,"totalThreads":1,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":false,"maySubmit":true}}],"notFound":[]},"queued-email-mailboxes"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
     MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
@@ -1608,6 +1609,12 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
     CHECK(summary.attemptedEmailCount == 1);
     CHECK(summary.updatedEmailCount == 1);
     CHECK(summary.failedEmailCount == 0);
+    CHECK(summary.settlementEffects.mailboxMembershipChanged);
+    CHECK(std::ranges::contains(summary.settlementEffects.affectedMailboxIds,
+                                std::string{"mbx-inbox"}));
+    CHECK(std::ranges::contains(summary.settlementEffects.affectedMailboxIds,
+                                std::string{"mbx-archive"}));
+    CHECK(summary.mailboxCountsChanged);
 
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().method == javelin::jmap::api::HttpMethod::Post);
@@ -1641,6 +1648,77 @@ TEST_CASE("EmailMutationEngine submits queued mailbox mutations through Email/se
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
         pendingResult));
     CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult).empty());
+}
+
+TEST_CASE(
+    "EmailMutationEngine method rejection advances mail cache revision before rollback publication",
+    "[jmap][core][mutation-journal][mail-cache-revision][regression]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {"$seen"};
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("u1", {email}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["error",{"type":"forbidden"},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+    MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued =
+        capabilities.emailMutations.queue("u1", javelin::jmap::EmailMailboxMutation{
+                                                    .emailId = "eml-1",
+                                                    .addMailboxIds = {"mbx-archive"},
+                                                    .removeMailboxIds = {"mbx-inbox"},
+                                                });
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+
+    const auto projected = emails.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(projected));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(projected).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(projected)->mailboxIds ==
+          std::vector<std::string>{"mbx-archive"});
+
+    javelin::jmap::sync::MailCacheRevisionRepository revisions{databaseContext.connection};
+    const auto beforeResult = revisions.capture("u1");
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailCacheRevisionFence>(beforeResult));
+    const auto before =
+        std::get<javelin::jmap::sync::MailCacheRevisionFence>(beforeResult).revision;
+
+    const auto submitted = QCoro::waitFor(capabilities.emailMutations.submitPending(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1"));
+    CHECK(std::holds_alternative<javelin::jmap::OperationError>(submitted));
+
+    const auto afterResult = revisions.capture("u1");
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailCacheRevisionFence>(afterResult));
+    CHECK(std::get<javelin::jmap::sync::MailCacheRevisionFence>(afterResult).revision > before);
+
+    const auto restored = emails.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(restored));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(restored).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(restored)->mailboxIds ==
+          std::vector<std::string>{"mbx-inbox"});
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto records = journal.listForEmail("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records));
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(records).empty());
 }
 
 TEST_CASE(
@@ -1916,7 +1994,12 @@ TEST_CASE("EmailMutationEngine keeps newer optimistic mutations projected while 
         },
         "u1", "group-2"));
     REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(rejected));
-    CHECK(std::get<javelin::jmap::SubmittedEmailMutations>(rejected).failedEmailCount == 1);
+    const auto& rejectedSummary = std::get<javelin::jmap::SubmittedEmailMutations>(rejected);
+    CHECK(rejectedSummary.failedEmailCount == 1);
+    CHECK_FALSE(rejectedSummary.settlementEffects.mailboxMembershipChanged);
+    CHECK(rejectedSummary.settlementEffects.affectedMailboxIds.empty());
+    CHECK(rejectedSummary.vaultProjectionWorkQueued);
+    CHECK_FALSE(rejectedSummary.mailboxCountsChanged);
 
     const auto confirmed = emailRepository.find("u1", "eml-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(confirmed));
@@ -2197,7 +2280,7 @@ TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Ema
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
         .body =
-            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"],["Mailbox/get",{"accountId":"u1","state":"mailbox-state-2","list":[{"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":1,"unreadEmails":0,"totalThreads":1,"unreadThreads":0,"isSubscribed":true,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":false,"maySubmit":true}}],"notFound":[]},"queued-email-mailboxes"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
     MailCapabilities capabilities{databaseContext.connection, transport, transport.methodTransport};
@@ -2226,9 +2309,12 @@ TEST_CASE("EmailMutationEngine submits queued read keyword mutations through Ema
     CHECK(summary.attemptedEmailCount == 1);
     CHECK(summary.updatedEmailCount == 1);
     CHECK(summary.failedEmailCount == 0);
+    CHECK_FALSE(summary.settlementEffects.mailboxMembershipChanged);
+    CHECK(summary.mailboxCountsChanged);
 
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().body.contains("\"Email/set\""));
+    CHECK(transport.requests.front().body.contains("\"Mailbox/get\""));
     CHECK(transport.requests.front().body.contains("\"keywords/$seen\":true"));
     CHECK_FALSE(transport.requests.front().body.contains("\"keywords\":{"));
 

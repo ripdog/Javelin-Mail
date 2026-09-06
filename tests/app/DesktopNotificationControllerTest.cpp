@@ -3,6 +3,7 @@
 #include "app/AccountRuntimeManager.h"
 #include "app/CacheLocationProvider.h"
 #include "app/DeferredSendService.h"
+#include "app/FullMailSyncService.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
 #include "app/MessageContentApplicationService.h"
@@ -205,6 +206,85 @@ namespace
         return query.value(0).toInt();
     }
 } // namespace
+
+TEST_CASE("daemon background honors explicit offline catch-up scope on settlement publication",
+          "[app][daemon][mail-background][offline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto location = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(location));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(location))};
+    auto& connection = services.databaseConnection();
+
+    QSqlQuery account{connection.database()};
+    REQUIRE(account.exec(QStringLiteral(
+        "INSERT INTO accounts(account_id,email_address,session_url,is_primary,cap_mail) "
+        "VALUES('account-1','user@example.test','https://example.test/jmap',1,1)")));
+    QSqlQuery mailbox{connection.database()};
+    REQUIRE(mailbox.exec(QStringLiteral(
+        "INSERT INTO mailboxes(account_id,mailbox_id,name,role,total_emails,total_threads,"
+        "is_subscribed) VALUES('account-1','archive','Archive','archive',1,1,1)")));
+    javelin::jmap::domain::Email email;
+    email.id = "email-1";
+    email.blobId = "blob-1";
+    email.threadId = "thread-1";
+    email.mailboxIds = {"archive"};
+    email.receivedAt = "2026-09-06T00:00:00Z";
+    email.subject = "Offline catch-up";
+    javelin::jmap::cache::EmailRepository emails{connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+
+    services.fullMailSyncService().applySettings({javelin::app::FullSyncAccountConfiguration{
+        .settings = {.connectionId = "connection-1",
+                     .revision = 1,
+                     .sessionUrl = "https://example.test/.well-known/jmap",
+                     .loginEmail = "user@example.test",
+                     .apiKey = "token",
+                     .refreshToken = {},
+                     .tokenEndpoint = {},
+                     .oauthClientId = {}},
+        .accountId = "account-1",
+        .mailboxIds = {"archive"},
+    }});
+    QSqlQuery complete{connection.database()};
+    REQUIRE(complete.exec(
+        QStringLiteral("UPDATE offline_mailbox_scopes SET status='complete',generation=1,"
+                       "completed_generation=1,query_state='query-state',email_state='email-state' "
+                       "WHERE account_id='account-1' AND mailbox_id='archive'")));
+    QSqlQuery clearMembership{connection.database()};
+    REQUIRE(clearMembership.exec(
+        QStringLiteral("DELETE FROM offline_mailbox_membership WHERE account_id='account-1' AND "
+                       "mailbox_id='archive'")));
+
+    auto notifications = std::make_unique<javelin::app::DesktopNotificationController>(
+        std::make_unique<FakeNotificationTransport>(), false, true);
+    javelin::app::DaemonBackgroundController background{services, std::move(notifications)};
+    background.start(false);
+
+    javelin::app::MailCacheChange change{
+        .accountId = QStringLiteral("account-1"),
+        .mailboxIds = {},
+        .queryWindows = {},
+        .searchWindows = {},
+        .optimisticProjection = true,
+    };
+    change.background.offlineCatchUp.addMailbox(QStringLiteral("archive"));
+    services.mailMutationApplicationService().cacheCommitted(std::move(change));
+
+    QSqlQuery membership{connection.database()};
+    REQUIRE(membership.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM offline_mailbox_membership WHERE account_id='account-1' AND "
+        "mailbox_id='archive' AND email_id='email-1'")));
+    REQUIRE(membership.next());
+    CHECK(membership.value(0).toInt() == 1);
+}
 
 TEST_CASE("mail notification activation preserves the message route and mailbox name",
           "[app][daemon][notification][activation]")
