@@ -48,7 +48,7 @@ correlated daemon reply owns request completion and any server-returned anchored
 search sessions may coalesce the resulting SQLite read but do not let an unrelated same-mailbox sort
 or window satisfy the request.
 
-### Thread membership and child materialization
+## Thread membership and child materialization
 
 The daemon implements this coverage split through `ThreadMaterializationCoordinator` and
 `ThreadMembershipMaterializationWorker`; the earlier staged design is recorded in
