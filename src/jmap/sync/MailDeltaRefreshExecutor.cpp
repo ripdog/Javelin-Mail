@@ -626,12 +626,6 @@ namespace javelin::jmap::sync
             const std::optional<std::string>& expectedState,
             const std::optional<std::vector<std::string>>& notificationBaselineMailboxIds)
         {
-            const auto workingSetResult = localEmailWorkingSet(databaseConnection, accountId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&workingSetResult))
-                co_return operationError(*error);
-            const auto& workingSet = std::get<std::vector<std::string>>(workingSetResult);
-
             ConsistencyDomainRepository consistency{databaseConnection};
             MailCacheRevisionRepository cacheRevisions{databaseConnection};
             const auto revisionResult = cacheRevisions.capture(accountId);
@@ -644,6 +638,12 @@ namespace javelin::jmap::sync
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceResult))
                 co_return operationError(*error);
             const auto fence = std::get<RefreshFence>(fenceResult);
+
+            const auto workingSetResult = localEmailWorkingSet(databaseConnection, accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&workingSetResult))
+                co_return operationError(*error);
+            const auto& workingSet = std::get<std::vector<std::string>>(workingSetResult);
 
             const auto fetched = co_await fetchStableEmailRebaseline(
                 methodCaller, apiRequestContext, remoteAccountId, workingSet);

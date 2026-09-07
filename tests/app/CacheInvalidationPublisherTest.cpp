@@ -1,4 +1,5 @@
 #include "app/CacheInvalidationPublisher.h"
+#include "protocol/SocketWireCodecInternal.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -230,4 +231,104 @@ TEST_CASE("cache invalidation publisher can publish a committed mutation synchro
     REQUIRE(invalidation.has_value());
     CHECK(invalidation->epoch == 0);
     CHECK(invalidation->change.optimisticProjection);
+}
+
+TEST_CASE("cache invalidation publisher preserves every window across bounded batches",
+          "[app][cache][invalidation]")
+{
+    javelin::app::CacheInvalidationPublisher publisher;
+    std::vector<javelin::app::MailCacheInvalidation> invalidations;
+    QObject::connect(&publisher, &javelin::app::CacheInvalidationPublisher::invalidated,
+                     [&invalidations](auto invalidation)
+                     { invalidations.push_back(std::move(invalidation)); });
+    for (std::size_t index = 0; index < 600; ++index)
+    {
+        javelin::app::MailCacheChange change;
+        change.accountId = QStringLiteral("account");
+        change.queryWindows.push_back({.mailboxId = QStringLiteral("inbox"),
+                                       .queryKey = QStringLiteral("query-%1").arg(index),
+                                       .offset = index,
+                                       .limit = 50,
+                                       .total = 1000});
+        change.searchWindows.push_back({.queryKey = QStringLiteral("search-%1").arg(index),
+                                        .offset = index,
+                                        .limit = 25,
+                                        .total = 2000});
+        publisher.publish(std::move(change));
+    }
+    publisher.flush();
+    REQUIRE(invalidations.size() == 3);
+    std::size_t index = 0;
+    for (const auto& invalidation : invalidations)
+    {
+        CHECK(invalidation.change.queryWindows.size() <= 256);
+        REQUIRE(invalidation.change.searchWindows.size() ==
+                invalidation.change.queryWindows.size());
+        for (std::size_t offset = 0; offset < invalidation.change.queryWindows.size();
+             ++offset, ++index)
+        {
+            const auto& mailbox = invalidation.change.queryWindows[offset];
+            const auto& search = invalidation.change.searchWindows[offset];
+            CHECK(mailbox.mailboxId == QStringLiteral("inbox"));
+            CHECK(mailbox.queryKey == QStringLiteral("query-%1").arg(index));
+            CHECK(mailbox.offset == index);
+            CHECK(mailbox.limit == 50);
+            CHECK(mailbox.total == 1000);
+            CHECK(search.queryKey == QStringLiteral("search-%1").arg(index));
+            CHECK(search.offset == index);
+            CHECK(search.limit == 25);
+            CHECK(search.total == 2000);
+        }
+    }
+    CHECK(index == 600);
+}
+
+TEST_CASE("cache invalidation publisher bounds frames containing long query identities",
+          "[app][cache][invalidation]")
+{
+    javelin::app::CacheInvalidationPublisher publisher;
+    std::size_t mailboxCount = 0;
+    std::size_t searchCount = 0;
+    QObject::connect(
+        &publisher, &javelin::app::CacheInvalidationPublisher::invalidated,
+        [&](const auto& invalidation)
+        {
+            javelin::protocol::CacheInvalidation wire;
+            wire.accountId = invalidation.change.accountId;
+            wire.affectedKeys = invalidation.affectedKeys;
+            wire.changedDomains = invalidation.changedDomains;
+            for (const auto& window : invalidation.change.queryWindows)
+                wire.mailboxWindows.push_back({.mailboxId = window.mailboxId,
+                                               .queryKey = window.queryKey,
+                                               .offset = window.offset,
+                                               .limit = window.limit,
+                                               .total = window.total});
+            for (const auto& window : invalidation.change.searchWindows)
+                wire.searchWindows.push_back({.queryKey = window.queryKey,
+                                              .offset = window.offset,
+                                              .limit = window.limit,
+                                              .total = window.total});
+            const auto encoded = javelin::protocol::detail::encodeBoundaryEvent(wire, {});
+            REQUIRE(std::holds_alternative<javelin::protocol::detail::EncodedPayload>(encoded));
+            CHECK(std::get<javelin::protocol::detail::EncodedPayload>(encoded).payload.size() <=
+                  1024 * 1024);
+            mailboxCount += wire.mailboxWindows.size();
+            searchCount += wire.searchWindows.size();
+        });
+    javelin::app::MailCacheChange change;
+    change.accountId = QStringLiteral("account");
+    for (std::size_t index = 0; index < 300; ++index)
+    {
+        const auto key = QString(4000, QLatin1Char('q')) + QString::number(index);
+        change.queryWindows.push_back({.mailboxId = QStringLiteral("inbox"),
+                                       .queryKey = key,
+                                       .offset = index,
+                                       .limit = 100,
+                                       .total = 1000});
+        change.searchWindows.push_back(
+            {.queryKey = key, .offset = index, .limit = 100, .total = 1000});
+    }
+    publisher.publishImmediately(std::move(change));
+    CHECK(mailboxCount == 300);
+    CHECK(searchCount == 300);
 }

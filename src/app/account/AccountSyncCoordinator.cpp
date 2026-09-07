@@ -1,5 +1,6 @@
 #include "app/account/AccountSyncCoordinator.h"
 
+#include "app/MailBackgroundEffects.h"
 #include "app/StateChangePolicy.h"
 #include "app/WorkScheduler.h"
 
@@ -51,19 +52,9 @@ namespace javelin::app
         [[nodiscard]] MailBackgroundEffects
         backgroundEffects(const javelin::jmap::sync::MailDeltaRefreshSummary& summary)
         {
-            MailBackgroundEffects background;
-            if (summary.backgroundRecoveryAccountWide)
-            {
-                background.offlineCatchUp.accountWide = true;
-            }
-            else if (summary.effects.mailboxMembershipChanged ||
-                     summary.effects.sourceIdentityChanged)
-            {
-                for (const auto& mailboxId : summary.effects.affectedMailboxIds)
-                    background.offlineCatchUp.addMailbox(QString::fromStdString(mailboxId));
-            }
+            auto background = javelin::app::backgroundEffects(
+                summary.effects, summary.backgroundRecoveryAccountWide);
             background.mailboxCountsChanged = summary.mailboxChanged;
-            background.vaultProjectionWorkQueued = summary.effects.mailboxMembershipChanged;
             return background;
         }
 

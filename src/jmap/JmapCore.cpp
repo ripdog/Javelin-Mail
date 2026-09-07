@@ -71,6 +71,30 @@ namespace javelin::jmap
 
     namespace
     {
+        [[nodiscard]] std::variant<javelin::jmap::sync::MailCommitEffects, OperationError>
+        pageCommitEffects(javelin::jmap::cache::EmailRepository& repository,
+                          const std::string_view accountId, const std::vector<std::string>& ids,
+                          const std::vector<javelin::jmap::domain::Email>& current)
+        {
+            auto previous = repository.findMany(accountId, ids);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&previous))
+                return javelin::jmap::operationError(*error);
+            std::unordered_map<std::string, javelin::jmap::domain::Email> snapshots;
+            for (auto& email : std::get<std::vector<javelin::jmap::domain::Email>>(previous))
+            {
+                const auto id = email.id;
+                snapshots.emplace(id, std::move(email));
+            }
+            javelin::jmap::sync::MailCommitEffects effects;
+            for (const auto& email : current)
+            {
+                const auto found = snapshots.find(email.id);
+                javelin::jmap::sync::accumulateMailCommitEffects(
+                    effects, found == snapshots.end() ? std::nullopt : std::optional{found->second},
+                    email);
+            }
+            return effects;
+        }
 
         struct CachedAccountIdentity
         {
@@ -3740,18 +3764,12 @@ namespace javelin::jmap
 
         auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
         auto emailIds = page.representativeIds;
-        javelin::jmap::sync::MailCommitEffects effects;
         javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
-        for (const auto& email : page.representatives)
-        {
-            const auto previousResult = emailRepository.find(accountId, email.id);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&previousResult))
-                co_return javelin::jmap::operationError(*error);
-            javelin::jmap::sync::accumulateMailCommitEffects(
-                effects, std::get<std::optional<javelin::jmap::domain::Email>>(previousResult),
-                email);
-        }
+        auto effectsResult = pageCommitEffects(emailRepository, accountId, page.representativeIds,
+                                               page.representatives);
+        if (const auto* error = std::get_if<OperationError>(&effectsResult))
+            co_return *error;
+        auto effects = std::get<javelin::jmap::sync::MailCommitEffects>(std::move(effectsResult));
         auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
             *m_impl->databaseConnection, QStringLiteral("Materialize search window"));
         if (const auto* error =
@@ -3861,18 +3879,12 @@ namespace javelin::jmap
         const auto materializedOffset = javelin::jmap::sync::materializedMailboxWindowOffset(
             offset, anchoredRequest, page.position);
         auto representativeIds = page.representativeIds;
-        javelin::jmap::sync::MailCommitEffects effects;
         javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
-        for (const auto& email : page.representatives)
-        {
-            const auto previousResult = emailRepository.find(accountId, email.id);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&previousResult))
-                co_return javelin::jmap::operationError(*error);
-            javelin::jmap::sync::accumulateMailCommitEffects(
-                effects, std::get<std::optional<javelin::jmap::domain::Email>>(previousResult),
-                email);
-        }
+        auto effectsResult = pageCommitEffects(emailRepository, accountId, page.representativeIds,
+                                               page.representatives);
+        if (const auto* error = std::get_if<OperationError>(&effectsResult))
+            co_return *error;
+        auto effects = std::get<javelin::jmap::sync::MailCommitEffects>(std::move(effectsResult));
         const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
             .mailboxId = mailboxId,
             .sortProperty = javelin::jmap::query::propertyName(sort.property),

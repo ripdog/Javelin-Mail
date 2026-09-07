@@ -2,6 +2,7 @@
 #include "jmap/sync/PushActivityTracker.h"
 #include "jmap/sync/PushProtocol.h"
 #include "jmap/sync/PushStreamSession.h"
+#include <QDeadlineTimer>
 
 #include <QCoroTask>
 
@@ -293,7 +294,8 @@ TEST_CASE("event source reply destruction cancels a suspended consume safely",
     REQUIRE(networkAccessManager.reply != nullptr);
 
     networkAccessManager.finishAndDestroyReply();
-    for (int iteration = 0; iteration < 10 && !completed.has_value(); ++iteration)
+    QDeadlineTimer deadline{2000};
+    while (!completed.has_value() && !deadline.hasExpired())
         QCoreApplication::processEvents(QEventLoop::AllEvents);
 
     REQUIRE(completed.has_value());

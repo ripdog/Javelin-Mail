@@ -1,4 +1,5 @@
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
+#include <algorithm>
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
@@ -140,6 +141,9 @@ namespace
                     target.push_back(value);
             }
         };
+        javelin::jmap::sync::mergeMailCommitEffects(destination.effects, source.effects);
+        destination.backgroundRecoveryAccountWide =
+            destination.backgroundRecoveryAccountWide || source.backgroundRecoveryAccountWide;
         destination.mailboxChanged = destination.mailboxChanged || source.mailboxChanged;
         destination.emailChanged = destination.emailChanged || source.emailChanged;
         destination.mailboxNeedsFullRefresh =

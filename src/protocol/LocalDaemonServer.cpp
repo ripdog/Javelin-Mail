@@ -466,16 +466,26 @@ namespace javelin::protocol
                     const auto& source = std::get<CacheInvalidation>(event);
                     if (target->accountId != source.accountId)
                         continue;
-                    mergeInvalidation(*target, source, m_options.limits);
-                    const auto merged = encodeBoundaryEvent(*iterator->event, m_options.limits);
+                    // A newer invalidation for this account is an ordering barrier. If it cannot
+                    // absorb the source, leave the source behind it instead of merging into an
+                    // older frame.
+                    if (target->mailboxWindows.size() + source.mailboxWindows.size() >
+                            m_options.limits.maximumCollectionItems ||
+                        target->searchWindows.size() + source.searchWindows.size() >
+                            m_options.limits.maximumCollectionItems)
+                        break;
+                    auto candidate = *target;
+                    mergeInvalidation(candidate, source, m_options.limits);
+                    const auto merged = encodeBoundaryEvent(candidate, m_options.limits);
                     if (std::holds_alternative<SocketFrameError>(merged))
-                        return false;
+                        break;
                     const auto mergedFrame =
                         encodeSocketFrame(SocketFrameKind::BoundaryEventFrame, 0,
                                           std::get<EncodedPayload>(merged).payload,
                                           m_options.limits.maximumFrameBytes);
                     if (std::holds_alternative<SocketFrameError>(mergedFrame))
-                        return false;
+                        break;
+                    *target = std::move(candidate);
                     m_queuedBytes -= static_cast<std::size_t>(iterator->data.size());
                     iterator->data = std::get<QByteArray>(mergedFrame);
                     m_queuedBytes += static_cast<std::size_t>(iterator->data.size());

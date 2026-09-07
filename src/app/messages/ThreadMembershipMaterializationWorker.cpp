@@ -365,6 +365,7 @@ namespace javelin::app
         for (const auto& threadId : target.threadIds)
         {
             std::size_t reconciliationCount = 0;
+            unsigned int supersededAttempts = 0;
             while (true)
             {
                 auto missingResult = threads.missingEmailIds(target.accountId, threadId, batchSize);
@@ -457,7 +458,15 @@ namespace javelin::app
                         std::get_if<javelin::jmap::cache::DatabaseError>(&revisionAdvanced))
                     co_return javelin::jmap::operationError(*databaseError);
                 if (!std::get<bool>(revisionAdvanced))
+                {
+                    if (++supersededAttempts >= 3)
+                        co_return error(
+                            javelin::jmap::OperationErrorCode::Conflict,
+                            QStringLiteral(
+                                "Mail changed repeatedly during Thread materialization."));
                     continue;
+                }
+                supersededAttempts = 0;
                 if (const auto databaseError = emails.upsertMany(transaction.cacheTransaction(),
                                                                  target.accountId, response.list))
                     co_return javelin::jmap::operationError(*databaseError);

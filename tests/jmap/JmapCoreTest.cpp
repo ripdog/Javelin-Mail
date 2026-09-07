@@ -5,6 +5,7 @@
 #include "jmap/sync/EmailMutationEngine.h"
 #include "jmap/sync/MailDeltaRefreshExecutor.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include <algorithm>
 
 #include "FixtureReader.h"
 #include "jmap/api/JmapMethodTransport.h"

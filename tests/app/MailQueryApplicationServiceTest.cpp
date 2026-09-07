@@ -2,6 +2,7 @@
 #include "app/AccountRuntimeManager.h"
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/MailboxMaintenanceRegistry.h"
+#include "app/ThreadMaterializationCoordinator.h"
 #include "app/WorkScheduler.h"
 #include "jmap/AccountBootstrapClient.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -15,10 +16,12 @@
 #include "jmap/cache/MailboxMessageReadRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MailboxStatisticsReadRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/query/MailQueryMaterializer.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "jmap/sync/MailCommitEffects.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -36,6 +39,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -95,6 +99,7 @@ namespace
         std::size_t emailQueryCalls = 0;
         std::chrono::milliseconds delay{40};
         bool failFullFallbackAfterIncrementalCommit = false;
+        std::function<void()> beforeResponse;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest request) override
@@ -113,6 +118,8 @@ namespace
                 co_await qCoro(timer).waitForTimeout();
             }
 
+            if (beforeResponse)
+                beforeResponse();
             const auto queryState = "query-state-" + std::to_string(callNumber);
             if (m_fallbackFailureArmed &&
                 std::ranges::any_of(request.envelope.methodCalls, [](const auto& invocation)
@@ -593,4 +600,143 @@ TEST_CASE("retiring a pending search prevents its late window from reappearing",
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SearchWindowRecord>>(found));
     CHECK_FALSE(
         std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(found).has_value());
+}
+
+TEST_CASE("mail query admission fails after repeated cache supersession",
+          "[app][mail-query][admission][retry]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    fixture.methodTransport.beforeResponse = [&]
+    {
+        javelin::jmap::sync::MailCacheRevisionRepository revisions{fixture.database};
+        auto begun = javelin::jmap::cache::DatabaseTransaction::begin(
+            fixture.database, QStringLiteral("Concurrent test commit"));
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(begun));
+        auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(begun));
+        REQUIRE_FALSE(revisions.advance(transaction, "account-1").has_value());
+        REQUIRE_FALSE(transaction.commit().has_value());
+    };
+    SECTION("mailbox")
+    {
+        std::optional<javelin::app::MailboxWindowResult> result;
+        auto task = fixture.service.requestMailboxWindow(fixture.pageIntent());
+        QCoro::connect(std::move(task), &fixture.service,
+                       [&result](auto value) { result = std::move(value); });
+        REQUIRE(waitUntil([&] { return result.has_value(); }));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(*result));
+        CHECK(std::get<javelin::jmap::OperationError>(*result).code ==
+              javelin::jmap::OperationErrorCode::Conflict);
+    }
+    SECTION("search")
+    {
+        javelin::app::SearchWindowIntent intent;
+        intent.accountId = "account-1";
+        intent.criteria.text = "needle";
+        intent.limit = 100;
+        intent.windowKey = "retry-search";
+        std::optional<javelin::app::SearchWindowResult> result;
+        auto task = fixture.service.requestSearchWindow(intent);
+        QCoro::connect(std::move(task), &fixture.service,
+                       [&result](auto value) { result = std::move(value); });
+        REQUIRE(waitUntil([&] { return result.has_value(); }));
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(*result));
+        CHECK(std::get<javelin::jmap::OperationError>(*result).code ==
+              javelin::jmap::OperationErrorCode::Conflict);
+    }
+    CHECK(fixture.methodTransport.calls == 3);
+}
+
+TEST_CASE("mail query admission keeps distinct sort and anchor requests independent",
+          "[app][mail-query][admission][identity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    auto firstIntent = fixture.pageIntent();
+    auto secondIntent = firstIntent;
+    SECTION("sort")
+    {
+        secondIntent.sort.property = javelin::jmap::query::EmailListSortProperty::Subject;
+    }
+    SECTION("anchor")
+    {
+        secondIntent.anchor = "email-1";
+    }
+    std::optional<javelin::app::MailboxWindowResult> firstResult;
+    std::optional<javelin::app::MailboxWindowResult> secondResult;
+    auto first = fixture.service.requestMailboxWindow(firstIntent);
+    QCoro::connect(std::move(first), &fixture.service,
+                   [&firstResult](auto value) { firstResult = std::move(value); });
+    REQUIRE(waitUntil([&] { return fixture.methodTransport.calls == 1; }));
+    auto second = fixture.service.requestMailboxWindow(secondIntent);
+    QCoro::connect(std::move(second), &fixture.service,
+                   [&secondResult](auto value) { secondResult = std::move(value); });
+    REQUIRE(waitUntil([&] { return firstResult.has_value() && secondResult.has_value(); }));
+    CHECK(fixture.methodTransport.calls >= 2);
+    REQUIRE(std::holds_alternative<javelin::app::MailboxWindowSummary>(*firstResult));
+    REQUIRE(std::holds_alternative<javelin::app::MailboxWindowSummary>(*secondResult));
+    javelin::jmap::cache::MailboxWindowRepository windows{fixture.database};
+    for (const auto& intent : {firstIntent, secondIntent})
+    {
+        const auto key = javelin::jmap::sync::mailboxQueryKey(
+            {.mailboxId = intent.mailboxId,
+             .sortProperty = javelin::jmap::query::propertyName(intent.sort.property),
+             .isAscending = javelin::jmap::query::isAscending(intent.sort),
+             .collapseThreads = true});
+        const auto found = windows.find(intent.accountId, key, intent.offset, intent.limit);
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+            found));
+        REQUIRE(
+            std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(found).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(found)->queryKey ==
+              key);
+    }
+}
+
+TEST_CASE("runtime mailbox publication hydrates the exact query identity",
+          "[app][mail-query][identity][thread-materialization]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    Fixture fixture;
+    javelin::jmap::domain::Email email;
+    email.id = "representative";
+    email.threadId = "custom-sort-thread";
+    email.blobId = "blob";
+    email.mailboxIds = {"inbox"};
+    email.receivedAt = "2026-09-05T00:00:00Z";
+    javelin::jmap::cache::EmailRepository emails{fixture.database};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+    const auto queryKey = javelin::jmap::sync::mailboxQueryKey({.mailboxId = "inbox",
+                                                                .sortProperty = "subject",
+                                                                .isAscending = true,
+                                                                .collapseThreads = true});
+    javelin::jmap::cache::MailboxWindowRepository windows{fixture.database};
+    REQUIRE_FALSE(windows
+                      .replace({.accountId = "account-1",
+                                .mailboxId = "inbox",
+                                .queryKey = queryKey,
+                                .requestedOffset = 200,
+                                .requestedLimit = 50,
+                                .position = 200,
+                                .returnedLimit = 50,
+                                .total = 201,
+                                .queryState = "query-state",
+                                .emailIds = {email.id}})
+                      .has_value());
+    javelin::app::ThreadMaterializationCoordinator coordinator{fixture.database,
+                                                               fixture.workScheduler};
+    fixture.service.setThreadMaterializationCoordinator(&coordinator);
+    javelin::app::MailCacheChange change;
+    change.accountId = QStringLiteral("account-1");
+    change.queryWindows = {{.mailboxId = QStringLiteral("inbox"),
+                            .queryKey = QString::fromStdString(queryKey),
+                            .offset = 200,
+                            .limit = 50,
+                            .total = 201}};
+    fixture.runtime.cacheCommitted(change);
+    CHECK(coordinator.pendingThreadCount("account-1") == 1);
+    fixture.service.setThreadMaterializationCoordinator(nullptr);
 }

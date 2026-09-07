@@ -174,10 +174,19 @@ namespace javelin::app
                 return result;
             }
             javelin::jmap::cache::EmailRepository emailsRepository{connection};
+            javelin::jmap::sync::MailCommitEffects reconciliationEffects;
+            for (const auto& email : emails)
+            {
+                const auto previous = emailsRepository.find(accountId, email.id);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&previous))
+                    return FullMailboxPageCommit{error->message};
+                javelin::jmap::sync::accumulateMailCommitEffects(
+                    reconciliationEffects,
+                    std::get<std::optional<javelin::jmap::domain::Email>>(previous), email);
+            }
             if (const auto error = emailsRepository.upsertMany(emailTransaction.cacheTransaction(),
                                                                accountId, emails))
                 return FullMailboxPageCommit{error->message};
-            javelin::jmap::sync::MailCommitEffects reconciliationEffects;
             if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
                     emailTransaction, connection, accountId, emailIds, emailState,
                     &reconciliationEffects))
@@ -993,7 +1002,7 @@ namespace javelin::app
 
         if (m_runningAccounts.contains(std::string{accountId}))
         {
-            requestCatchUp(accountId);
+            requestCatchUp(accountId, {std::string{mailboxId}});
             return;
         }
 
@@ -1210,6 +1219,7 @@ namespace javelin::app
                     total = static_cast<std::size_t>(resume.value(2).toULongLong());
                 resume.finish();
             }
+            unsigned int supersededAttempts = 0;
             while (true)
             {
                 if (mailboxSubscribed(scope.accountId, scope.mailboxId) != std::optional{true})
@@ -1291,8 +1301,24 @@ namespace javelin::app
                 }
                 if (commit.superseded)
                 {
+                    if (++supersededAttempts >= 3)
+                    {
+                        static_cast<void>(m_scheduler.update(
+                            scope.jobId, WorkStatus::Failed, progress,
+                            checkpoint(QStringLiteral("enumerating"), position, generation),
+                            i18n("Mail changed repeatedly during offline synchronization. Please "
+                                 "retry.")));
+                        co_return;
+                    }
+                    QTimer retryTimer;
+                    retryTimer.setSingleShot(true);
+                    retryTimer.start(25);
+                    co_await qCoro(retryTimer).waitForTimeout();
+                    if (!self)
+                        co_return;
                     continue;
                 }
+                supersededAttempts = 0;
                 if (commit.restartRequired)
                 {
                     const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};

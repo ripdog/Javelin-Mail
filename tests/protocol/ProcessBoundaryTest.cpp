@@ -1464,3 +1464,125 @@ TEST_CASE("socket endpoint rejects malformed peers and classifies lost replies",
           BoundaryErrorCode::TransportUnavailable);
     CHECK_FALSE(client.isConnected());
 }
+
+TEST_CASE("socket invalidation batches preserve windows while writes are pending",
+          "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+    RecordingHandler handler;
+    auto options = socketOptions(runtimeDirectory);
+    options.maximumQueuedBytes = 1024 * 1024;
+    SocketEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+    SocketDaemonClient client{options};
+    class WindowSink final : public BoundaryEventSink
+    {
+      public:
+        std::vector<QString> keys;
+        void onBoundaryEvent(const BoundaryEvent& event) override
+        {
+            if (const auto* change = std::get_if<CacheInvalidation>(&event))
+                for (const auto& window : change->mailboxWindows)
+                    keys.push_back(window.queryKey);
+        }
+    } sink;
+    REQUIRE_FALSE(client.attachEventSink(sink).has_value());
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+    auto* server = endpoint.endpointForThreadCallback();
+    QMetaObject::invokeMethod(
+        server,
+        [server]
+        {
+            for (int batch = 0; batch < 4; ++batch)
+            {
+                CacheInvalidation event;
+                event.epoch.value = static_cast<std::uint64_t>(batch + 1);
+                event.accountId = QStringLiteral("account");
+                event.changedDomains = {ChangedDomain::MailQueryWindows};
+                for (int index = 0; index < 200; ++index)
+                    event.mailboxWindows.push_back(
+                        {.mailboxId = QStringLiteral("inbox"),
+                         .queryKey = QStringLiteral("query-%1").arg(batch * 200 + index),
+                         .offset = 0,
+                         .limit = 100,
+                         .total = 1000});
+                server->publishEvent(event);
+            }
+        },
+        Qt::BlockingQueuedConnection);
+    processUntil([&] { return sink.keys.size() == 800 || !client.isConnected(); });
+    CHECK_FALSE(endpoint.lastError().has_value());
+    CHECK(client.isConnected());
+    REQUIRE(sink.keys.size() == 800);
+    for (int index = 0; index < 800; ++index)
+        CHECK(sink.keys[static_cast<std::size_t>(index)] == QStringLiteral("query-%1").arg(index));
+    CHECK_FALSE(client.ping().has_value());
+}
+
+TEST_CASE("socket invalidation coalescing does not cross a saturated newer frame",
+          "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+    RecordingHandler handler;
+    auto options = socketOptions(runtimeDirectory);
+    options.maximumQueuedBytes = 1024 * 1024;
+    SocketEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+    SocketDaemonClient client{options};
+    class WindowSink final : public BoundaryEventSink
+    {
+      public:
+        std::vector<QString> keys;
+        void onBoundaryEvent(const BoundaryEvent& event) override
+        {
+            if (const auto* change = std::get_if<CacheInvalidation>(&event))
+                for (const auto& window : change->mailboxWindows)
+                    keys.push_back(window.queryKey);
+        }
+    } sink;
+    REQUIRE_FALSE(client.attachEventSink(sink).has_value());
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+    auto* server = endpoint.endpointForThreadCallback();
+    QMetaObject::invokeMethod(
+        server,
+        [server]
+        {
+            const auto publish = [server](const int first, const int count)
+            {
+                CacheInvalidation event;
+                event.epoch.value = static_cast<std::uint64_t>(first + 1);
+                event.accountId = QStringLiteral("account");
+                event.changedDomains = {ChangedDomain::MailQueryWindows};
+                for (int index = first; index < first + count; ++index)
+                    event.mailboxWindows.push_back(
+                        {.mailboxId = QStringLiteral("inbox"),
+                         .queryKey = QStringLiteral("query-%1").arg(index),
+                         .offset = 0,
+                         .limit = 100,
+                         .total = 1000});
+                server->publishEvent(event);
+            };
+            publish(0, 1);
+            publish(1, 50);
+            publish(51, 220);
+            publish(271, 50);
+        },
+        Qt::BlockingQueuedConnection);
+    processUntil([&] { return sink.keys.size() == 321 || !client.isConnected(); });
+    CHECK_FALSE(endpoint.lastError().has_value());
+    CHECK(client.isConnected());
+    REQUIRE(sink.keys.size() == 321);
+    for (int index = 0; index < 321; ++index)
+        CHECK(sink.keys[static_cast<std::size_t>(index)] == QStringLiteral("query-%1").arg(index));
+    CHECK_FALSE(client.ping().has_value());
+}

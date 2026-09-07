@@ -5,7 +5,9 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+#include <algorithm>
 #include <array>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace javelin::jmap::cache
@@ -91,43 +93,6 @@ namespace javelin::jmap::cache
                 ") VALUES ("
                 ":account_id, :email_id, :field_name, :position, :display_name, :address)"));
             return insertAddresses(query, accountId, emailId, fieldName, addresses);
-        }
-
-        [[nodiscard]] std::vector<javelin::jmap::domain::EmailAddress>
-        loadAddresses(QSqlDatabase& database, std::string_view accountId, std::string_view emailId,
-                      std::string_view fieldName, std::optional<DatabaseError>& error)
-        {
-            QSqlQuery query{database};
-            query.prepare(QStringLiteral(
-                "SELECT display_name, address "
-                "FROM email_addresses "
-                "WHERE account_id = :account_id AND email_id = :email_id AND field_name "
-                "= :field_name "
-                "ORDER BY position"));
-            query.bindValue(QStringLiteral(":account_id"),
-                            QString::fromStdString(std::string{accountId}));
-            query.bindValue(QStringLiteral(":email_id"),
-                            QString::fromStdString(std::string{emailId}));
-            query.bindValue(QStringLiteral(":field_name"),
-                            QString::fromStdString(std::string{fieldName}));
-            if (!query.exec())
-            {
-                error = makeQueryError(QStringLiteral("Read email addresses"), query);
-                return {};
-            }
-
-            std::vector<javelin::jmap::domain::EmailAddress> addresses;
-            while (query.next())
-            {
-                addresses.push_back(javelin::jmap::domain::EmailAddress{
-                    .name = query.value(0).isNull()
-                                ? std::nullopt
-                                : std::optional{query.value(0).toString().toStdString()},
-                    .email = query.value(1).toString().toStdString(),
-                });
-            }
-
-            return addresses;
         }
 
         std::optional<DatabaseError> deleteEmailSummaryChildren(QSqlDatabase& database,
@@ -963,124 +928,137 @@ namespace javelin::jmap::cache
     std::variant<std::optional<javelin::jmap::domain::Email>, DatabaseError>
     EmailRepository::find(const std::string_view accountId, const std::string_view emailId) const
     {
-        if (const auto error = m_connection.validate())
-        {
+        const std::array ids{std::string{emailId}};
+        auto result = findMany(accountId, ids);
+        if (const auto* error = std::get_if<DatabaseError>(&result))
             return *error;
-        }
+        auto emails = std::get<std::vector<javelin::jmap::domain::Email>>(std::move(result));
+        if (emails.empty())
+            return std::optional<javelin::jmap::domain::Email>{};
+        return std::optional{std::move(emails.front())};
+    }
 
-        QSqlDatabase& database = m_connection.database();
-        QSqlQuery emailQuery{database};
-        emailQuery.prepare(
-            QStringLiteral("SELECT blob_id, thread_id, size, received_at, sent_at, "
-                           "message_id_json, in_reply_to_json, references_json, "
-                           "has_attachment, subject, preview "
-                           "FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
-        emailQuery.bindValue(QStringLiteral(":account_id"),
-                             QString::fromStdString(std::string{accountId}));
-        emailQuery.bindValue(QStringLiteral(":email_id"),
-                             QString::fromStdString(std::string{emailId}));
-        if (!emailQuery.exec())
+    std::variant<std::vector<javelin::jmap::domain::Email>, DatabaseError>
+    EmailRepository::findMany(const std::string_view accountId,
+                              const std::span<const std::string> emailIds) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        std::vector<std::string> uniqueIds(emailIds.begin(), emailIds.end());
+        std::ranges::sort(uniqueIds);
+        uniqueIds.erase(std::unique(uniqueIds.begin(), uniqueIds.end()), uniqueIds.end());
+        std::vector<javelin::jmap::domain::Email> result;
+        std::unordered_map<std::string, std::size_t> positions;
+        constexpr std::size_t batchSize = 256;
+        for (std::size_t begin = 0; begin < uniqueIds.size(); begin += batchSize)
         {
-            return makeQueryError(QStringLiteral("Read email"), emailQuery);
+            const auto end = std::min(begin + batchSize, uniqueIds.size());
+            QStringList placeholders;
+            for (auto index = begin; index < end; ++index)
+                placeholders.push_back(QStringLiteral("?"));
+            const auto predicate = QStringLiteral(" WHERE account_id = ? AND email_id IN (%1)")
+                                       .arg(placeholders.join(QLatin1Char(',')));
+            const auto execute = [&](QSqlQuery& query, const QString& statement)
+            {
+                query.prepare(statement);
+                query.addBindValue(QString::fromStdString(std::string{accountId}));
+                for (auto index = begin; index < end; ++index)
+                    query.addBindValue(QString::fromStdString(uniqueIds[index]));
+                return query.exec();
+            };
+            QSqlQuery emailQuery{m_connection.database()};
+            if (!execute(emailQuery,
+                         QStringLiteral("SELECT blob_id, thread_id, size, received_at, sent_at, "
+                                        "message_id_json, in_reply_to_json, references_json, "
+                                        "has_attachment, subject, preview, email_id FROM emails") +
+                             predicate))
+                return makeQueryError(QStringLiteral("Read email snapshots"), emailQuery);
+            while (emailQuery.next())
+            {
+                const auto id = emailQuery.value(11).toString().toStdString();
+                if (positions.contains(id))
+                    continue;
+                positions.emplace(id, result.size());
+                result.push_back(javelin::jmap::domain::Email{
+                    .id = emailQuery.value(11).toString().toStdString(),
+                    .blobId = emailQuery.value(0).toString().toStdString(),
+                    .threadId = emailQuery.value(1).toString().toStdString(),
+                    .mailboxIds = {},
+                    .keywords = {},
+                    .size = emailQuery.value(2).toULongLong(),
+                    .receivedAt = emailQuery.value(3).toString().toStdString(),
+                    .sentAt = emailQuery.value(4).isNull()
+                                  ? std::nullopt
+                                  : std::optional{emailQuery.value(4).toString().toStdString()},
+                    .messageId = deserializeStringList(emailQuery.value(5).toString()),
+                    .inReplyTo = deserializeStringList(emailQuery.value(6).toString()),
+                    .references = deserializeStringList(emailQuery.value(7).toString()),
+                    .hasAttachment = emailQuery.value(8).toInt() != 0,
+                    .subject = emailQuery.value(9).isNull()
+                                   ? std::nullopt
+                                   : std::optional{emailQuery.value(9).toString().toStdString()},
+                    .from = {},
+                    .to = {},
+                    .cc = {},
+                    .bcc = {},
+                    .replyTo = {},
+                    .preview = emailQuery.value(10).isNull()
+                                   ? std::nullopt
+                                   : std::optional{emailQuery.value(10).toString().toStdString()},
+                });
+            }
+            for (const auto& table :
+                 {QStringLiteral("email_mailboxes"), QStringLiteral("email_keywords")})
+            {
+                const bool mailbox = table == QStringLiteral("email_mailboxes");
+                const auto column =
+                    mailbox ? QStringLiteral("mailbox_id") : QStringLiteral("keyword");
+                QSqlQuery query{m_connection.database()};
+                if (!execute(query,
+                             QStringLiteral("SELECT email_id, %1 FROM %2").arg(column, table) +
+                                 predicate + QStringLiteral(" ORDER BY email_id, %1").arg(column)))
+                    return makeQueryError(QStringLiteral("Read email snapshot membership"), query);
+                while (query.next())
+                {
+                    const auto found = positions.find(query.value(0).toString().toStdString());
+                    if (found == positions.end())
+                        continue;
+                    auto& email = result[found->second];
+                    auto& values = mailbox ? email.mailboxIds : email.keywords;
+                    const auto value = query.value(1).toString().toStdString();
+                    if (std::ranges::find(values, value) == values.end())
+                        values.push_back(value);
+                }
+            }
+            QSqlQuery addresses{m_connection.database()};
+            if (!execute(
+                    addresses,
+                    QStringLiteral(
+                        "SELECT email_id, field_name, display_name, address FROM email_addresses") +
+                        predicate + QStringLiteral(" ORDER BY email_id, field_name, position")))
+                return makeQueryError(QStringLiteral("Read email snapshot addresses"), addresses);
+            while (addresses.next())
+            {
+                const auto found = positions.find(addresses.value(0).toString().toStdString());
+                if (found == positions.end())
+                    continue;
+                auto& email = result[found->second];
+                const auto field = addresses.value(1).toString();
+                auto* values = field == QLatin1StringView("from")      ? &email.from
+                               : field == QLatin1StringView("to")      ? &email.to
+                               : field == QLatin1StringView("cc")      ? &email.cc
+                               : field == QLatin1StringView("bcc")     ? &email.bcc
+                               : field == QLatin1StringView("replyTo") ? &email.replyTo
+                                                                       : nullptr;
+                if (values != nullptr)
+                    values->push_back(
+                        {.name = addresses.value(2).isNull()
+                                     ? std::nullopt
+                                     : std::optional{addresses.value(2).toString().toStdString()},
+                         .email = addresses.value(3).toString().toStdString()});
+            }
         }
-
-        if (!emailQuery.next())
-        {
-            return std::optional<javelin::jmap::domain::Email>{std::nullopt};
-        }
-
-        QSqlQuery mailboxQuery{database};
-        mailboxQuery.prepare(QStringLiteral(
-            "SELECT mailbox_id FROM email_mailboxes "
-            "WHERE account_id = :account_id AND email_id = :email_id ORDER BY mailbox_id"));
-        mailboxQuery.bindValue(QStringLiteral(":account_id"),
-                               QString::fromStdString(std::string{accountId}));
-        mailboxQuery.bindValue(QStringLiteral(":email_id"),
-                               QString::fromStdString(std::string{emailId}));
-        if (!mailboxQuery.exec())
-        {
-            return makeQueryError(QStringLiteral("Read email mailboxes"), mailboxQuery);
-        }
-
-        std::vector<std::string> mailboxIds;
-        while (mailboxQuery.next())
-        {
-            mailboxIds.push_back(mailboxQuery.value(0).toString().toStdString());
-        }
-
-        QSqlQuery keywordQuery{database};
-        keywordQuery.prepare(QStringLiteral(
-            "SELECT keyword FROM email_keywords "
-            "WHERE account_id = :account_id AND email_id = :email_id ORDER BY keyword"));
-        keywordQuery.bindValue(QStringLiteral(":account_id"),
-                               QString::fromStdString(std::string{accountId}));
-        keywordQuery.bindValue(QStringLiteral(":email_id"),
-                               QString::fromStdString(std::string{emailId}));
-        if (!keywordQuery.exec())
-        {
-            return makeQueryError(QStringLiteral("Read email keywords"), keywordQuery);
-        }
-
-        std::vector<std::string> keywords;
-        while (keywordQuery.next())
-        {
-            keywords.push_back(keywordQuery.value(0).toString().toStdString());
-        }
-
-        std::optional<DatabaseError> addressError;
-        auto from = loadAddresses(database, accountId, emailId, "from", addressError);
-        if (addressError.has_value())
-        {
-            return *addressError;
-        }
-        auto to = loadAddresses(database, accountId, emailId, "to", addressError);
-        if (addressError.has_value())
-        {
-            return *addressError;
-        }
-        auto cc = loadAddresses(database, accountId, emailId, "cc", addressError);
-        if (addressError.has_value())
-        {
-            return *addressError;
-        }
-        auto bcc = loadAddresses(database, accountId, emailId, "bcc", addressError);
-        if (addressError.has_value())
-        {
-            return *addressError;
-        }
-        auto replyTo = loadAddresses(database, accountId, emailId, "replyTo", addressError);
-        if (addressError.has_value())
-        {
-            return *addressError;
-        }
-
-        return std::optional<javelin::jmap::domain::Email>{javelin::jmap::domain::Email{
-            .id = std::string{emailId},
-            .blobId = emailQuery.value(0).toString().toStdString(),
-            .threadId = emailQuery.value(1).toString().toStdString(),
-            .mailboxIds = std::move(mailboxIds),
-            .keywords = std::move(keywords),
-            .size = emailQuery.value(2).toULongLong(),
-            .receivedAt = emailQuery.value(3).toString().toStdString(),
-            .sentAt = emailQuery.value(4).isNull()
-                          ? std::nullopt
-                          : std::optional{emailQuery.value(4).toString().toStdString()},
-            .messageId = deserializeStringList(emailQuery.value(5).toString()),
-            .inReplyTo = deserializeStringList(emailQuery.value(6).toString()),
-            .references = deserializeStringList(emailQuery.value(7).toString()),
-            .hasAttachment = emailQuery.value(8).toInt() != 0,
-            .subject = emailQuery.value(9).isNull()
-                           ? std::nullopt
-                           : std::optional{emailQuery.value(9).toString().toStdString()},
-            .from = std::move(from),
-            .to = std::move(to),
-            .cc = std::move(cc),
-            .bcc = std::move(bcc),
-            .replyTo = std::move(replyTo),
-            .preview = emailQuery.value(10).isNull()
-                           ? std::nullopt
-                           : std::optional{emailQuery.value(10).toString().toStdString()},
-        }};
+        return result;
     }
 
     std::variant<std::vector<std::string>, DatabaseError>

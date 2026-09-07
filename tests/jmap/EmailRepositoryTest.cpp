@@ -2,6 +2,7 @@
 #include "FixtureReader.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
+#include <algorithm>
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -446,4 +447,41 @@ TEST_CASE("email repository removes mailbox membership without deleting email",
     const auto& loaded = std::get<std::optional<javelin::jmap::domain::Email>>(loadedResult);
     REQUIRE(loaded.has_value());
     CHECK(loaded->mailboxIds == std::vector<std::string>{"mbx-archive"});
+}
+
+TEST_CASE("email snapshot batches preserve full documents and deduplicate requested ids",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    javelin::jmap::cache::EmailRepository repository{database.connection};
+    std::vector<javelin::jmap::domain::Email> emails;
+    std::vector<std::string> ids;
+    for (int index = 0; index < 300; ++index)
+    {
+        auto email = loadEmailFixture();
+        email.id = "email-" + std::to_string(index);
+        ids.push_back(email.id);
+        emails.push_back(std::move(email));
+    }
+    REQUIRE_FALSE(repository.upsertMany("account-1", emails).has_value());
+    ids.push_back(ids.front());
+    ids.push_back("missing");
+    const auto result = repository.findMany("account-1", ids);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::domain::Email>>(result));
+    const auto& loaded = std::get<std::vector<javelin::jmap::domain::Email>>(result);
+    REQUIRE(loaded.size() == emails.size());
+    for (const auto& email : loaded)
+    {
+        auto expected = loadEmailFixture();
+        expected.id = email.id;
+        std::ranges::sort(expected.keywords);
+        std::ranges::sort(expected.mailboxIds);
+        CHECK(email == expected);
+    }
+    const auto otherAccount = repository.findMany("absent-account", ids);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::domain::Email>>(otherAccount));
+    CHECK(std::get<std::vector<javelin::jmap::domain::Email>>(otherAccount).empty());
 }

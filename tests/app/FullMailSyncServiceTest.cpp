@@ -13,7 +13,9 @@
 #include "jmap/domain/MailEntities.h"
 #include "jmap/query/MailQueryClient.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MailCacheRevision.h"
 #include "storage/sqlite/DatabaseConnection.h"
+#include <functional>
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -133,6 +135,7 @@ namespace
     {
       public:
         std::size_t calls = 0;
+        std::function<void()> beforeResponse;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest request) override
@@ -140,6 +143,8 @@ namespace
             if (request.dispatched)
                 request.dispatched();
             ++calls;
+            if (beforeResponse)
+                beforeResponse();
             REQUIRE(request.envelope.methodCalls.size() == 2);
             REQUIRE(request.envelope.methodCalls[0].name == "Email/query");
             REQUIRE(request.envelope.methodCalls[1].name == "Email/get");
@@ -589,30 +594,41 @@ TEST_CASE("offline full sync publishes reconciliation effects for a confirmed un
         "INSERT INTO mailboxes(account_id,mailbox_id,name,role,total_emails,total_threads,"
         "is_subscribed) VALUES('account-1','inbox','Inbox','inbox',0,0,1)")));
 
-    upsertEmail(database.connection, email("email-1", "blob-1", "2026-09-06T00:00:00Z", 128));
     javelin::jmap::sync::EmailMutationJournal journal{database.connection};
-    REQUIRE_FALSE(journal
-                      .put({
-                          .mutationId = "lost-move",
-                          .operationGroupId = std::nullopt,
-                          .accountId = "account-1",
-                          .status = javelin::jmap::sync::MutationStatus::Unknown,
-                          .patch =
-                              {
-                                  .emailId = "email-1",
-                                  .addMailboxIds = {"archive"},
-                                  .removeMailboxIds = {"inbox"},
-                                  .addKeywords = {},
-                                  .removeKeywords = {},
-                                  .destroy = false,
-                              },
-                          .baseMailboxIds = std::vector<std::string>{"inbox"},
-                          .baseKeywords = std::vector<std::string>{},
-                          .baseState = "email-state-1",
-                          .acceptedState = std::nullopt,
-                          .errorJson = std::nullopt,
-                      })
-                      .has_value());
+    SECTION("ordinary server change")
+    {
+        auto previous = email("email-1", "blob-1", "2026-09-06T00:00:00Z", 128);
+        previous.mailboxIds = {"inbox"};
+        upsertEmail(database.connection, previous);
+    }
+    SECTION("unknown move reconciliation")
+    {
+        auto projected = email("email-1", "blob-1", "2026-09-06T00:00:00Z", 128);
+        projected.mailboxIds = {"archive"};
+        upsertEmail(database.connection, projected);
+        REQUIRE_FALSE(journal
+                          .put({
+                              .mutationId = "lost-move",
+                              .operationGroupId = std::nullopt,
+                              .accountId = "account-1",
+                              .status = javelin::jmap::sync::MutationStatus::Unknown,
+                              .patch =
+                                  {
+                                      .emailId = "email-1",
+                                      .addMailboxIds = {"archive"},
+                                      .removeMailboxIds = {"inbox"},
+                                      .addKeywords = {},
+                                      .removeKeywords = {},
+                                      .destroy = false,
+                                  },
+                              .baseMailboxIds = std::vector<std::string>{"inbox"},
+                              .baseKeywords = std::vector<std::string>{},
+                              .baseState = "email-state-1",
+                              .acceptedState = std::nullopt,
+                              .errorJson = std::nullopt,
+                          })
+                          .has_value());
+    }
 
     RecordingResourceTransport resources;
     UnknownMoveMethodTransport methods;
@@ -625,6 +641,7 @@ TEST_CASE("offline full sync publishes reconciliation effects for a confirmed un
                                               scheduler, indexer};
     std::optional<javelin::jmap::sync::MailCommitEffects> committedEffects;
     QObject::connect(&service, &javelin::app::FullMailSyncService::mailCommitEffectsCommitted,
+                     &service,
                      [&committedEffects](const QString& accountId,
                                          const javelin::jmap::sync::MailCommitEffects& effects)
                      {
@@ -866,4 +883,41 @@ TEST_CASE("mail indexing crosses a worker batch without retaining pending rows",
     const auto matches = searchIndex.search("account-1", "body", messageCount + 1);
     REQUIRE(std::holds_alternative<std::vector<std::string>>(matches));
     CHECK(std::get<std::vector<std::string>>(matches).size() == messageCount);
+}
+
+TEST_CASE("offline full sync bounds cache revision retries", "[app][offline][retry]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedAccount(database.connection);
+    RecordingResourceTransport resources;
+    UnknownMoveMethodTransport methods;
+    methods.beforeResponse = [&]
+    {
+        javelin::jmap::sync::MailCacheRevisionRepository revisions{database.connection};
+        auto begun = javelin::jmap::cache::DatabaseTransaction::begin(
+            database.connection, QStringLiteral("Concurrent test commit"));
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(begun));
+        auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(begun));
+        REQUIRE_FALSE(revisions.advance(transaction, "account-1").has_value());
+        REQUIRE_FALSE(transaction.commit().has_value());
+    };
+    javelin::jmap::MailQueryClient queryClient{database.connection, methods};
+    javelin::jmap::MessageContentClient contentClient{database.connection, resources};
+    javelin::app::WorkScheduler scheduler{database.connection, nullptr,
+                                          std::chrono::milliseconds{0}};
+    javelin::app::MailIndexService indexer{database.connection, scheduler};
+    javelin::app::FullMailSyncService service{database.connection, queryClient, contentClient,
+                                              scheduler, indexer};
+    service.applySettings({configuration()});
+    REQUIRE(waitUntil(
+        [&]
+        {
+            const auto job = scheduler.find(fullSyncJobId());
+            const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
+            return record != nullptr && record->has_value() &&
+                   (*record)->status == javelin::app::WorkStatus::Failed;
+        }));
+    CHECK(methods.calls == 3);
 }

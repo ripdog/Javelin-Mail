@@ -6,6 +6,8 @@
 #include "jmap/api/Session.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "jmap/sync/MailCacheRevision.h"
+#include <functional>
 
 #include <QCoroTask>
 
@@ -258,6 +260,7 @@ namespace
         bool reconcileWithoutMissingChild = false;
         bool omitLast = false;
         std::size_t childCount = 1;
+        std::function<void()> beforeEmailResponse;
         std::unordered_map<std::string, std::size_t> threadRequests;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
@@ -289,6 +292,8 @@ namespace
             if (method.name == "Email/get")
             {
                 emailBatches.push_back(ids);
+                if (beforeEmailResponse)
+                    beforeEmailResponse();
                 std::vector<std::string> found;
                 std::vector<std::string> missing;
                 for (const auto& id : ids)
@@ -801,4 +806,32 @@ TEST_CASE("rapid child disappearance leaves Thread stale after bounded reconcili
         std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership);
     REQUIRE(stale.has_value());
     CHECK(stale->freshness == javelin::jmap::cache::ThreadMembershipFreshness::Stale);
+}
+
+TEST_CASE("Thread materialization bounds cache revision retries",
+          "[app][thread-materialization][retry]")
+{
+    ensureApplication();
+    Fixture fixture;
+    fixture.seedRepresentative("thread-1");
+    RecordingTransport transport;
+    transport.beforeEmailResponse = [&]
+    {
+        javelin::jmap::sync::MailCacheRevisionRepository revisions{fixture.database};
+        auto begun = javelin::jmap::cache::DatabaseTransaction::begin(
+            fixture.database, QStringLiteral("Concurrent test commit"));
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(begun));
+        auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(begun));
+        REQUIRE_FALSE(revisions.advance(transaction, "account-1").has_value());
+        REQUIRE_FALSE(transaction.commit().has_value());
+    };
+    ConnectionProvider connections;
+    javelin::app::ThreadMembershipMaterializationWorker worker{fixture.database, transport,
+                                                               connections};
+    const auto result =
+        QCoro::waitFor(worker.materialize({.accountId = "account-1", .threadIds = {"thread-1"}}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::Conflict);
+    CHECK(transport.emailBatches.size() == 3);
 }

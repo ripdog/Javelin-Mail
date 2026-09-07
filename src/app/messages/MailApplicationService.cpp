@@ -1,6 +1,7 @@
 #include "app/AccountRuntimeManager.h"
 #include "app/CalendarApplicationService.h"
 #include "app/ContactApplicationService.h"
+#include "app/MailBackgroundEffects.h"
 #include "app/MailMutationApplicationService.h"
 #include "app/MailNotificationService.h"
 #include "app/MailQueryApplicationService.h"
@@ -472,29 +473,11 @@ namespace javelin::app
                                });
         }
 
-        [[nodiscard]] MailBackgroundEffects
-        backgroundEffects(const javelin::jmap::sync::MailCommitEffects& effects,
-                          const bool accountWideRecovery = false)
-        {
-            MailBackgroundEffects background;
-            if (accountWideRecovery)
-            {
-                background.offlineCatchUp.accountWide = true;
-            }
-            else if (effects.mailboxMembershipChanged || effects.sourceIdentityChanged)
-            {
-                for (const auto& mailboxId : effects.affectedMailboxIds)
-                    background.offlineCatchUp.addMailbox(QString::fromStdString(mailboxId));
-            }
-            background.vaultProjectionWorkQueued = effects.mailboxMembershipChanged;
-            return background;
-        }
-
         [[nodiscard]] QCoro::Task<void> yieldMailQueryRetry()
         {
             QTimer timer;
             timer.setSingleShot(true);
-            timer.start(0);
+            timer.start(25);
             co_await qCoro(timer).waitForTimeout();
         }
 
@@ -665,27 +648,22 @@ namespace javelin::app
                     m_mailboxInterests.eraseAccountsNotIn(
                         std::unordered_set<std::string>{configured.begin(), configured.end()});
                 });
-        connect(
-            &m_accountRuntime, &AccountRuntimeManager::cacheCommitted, this,
-            [this](const MailCacheChange& change)
-            {
-                if (m_threadMaterializationCoordinator == nullptr)
-                    return;
-                for (const auto& window : change.queryWindows)
+        connect(&m_accountRuntime, &AccountRuntimeManager::cacheCommitted, this,
+                [this](const MailCacheChange& change)
                 {
-                    const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
-                        .mailboxId = window.mailboxId.toStdString(),
-                        .sortProperty = "receivedAt",
-                        .isAscending = false,
-                        .collapseThreads = true,
-                    });
-                    if (const auto error = m_threadMaterializationCoordinator->enqueueMailboxWindow(
-                            change.accountId.toStdString(), queryKey, window.offset, window.limit))
-                        qWarning().noquote()
-                            << "Could not enqueue refreshed mailbox Thread materialization"
-                            << error->message;
-                }
-            });
+                    if (m_threadMaterializationCoordinator == nullptr)
+                        return;
+                    for (const auto& window : change.queryWindows)
+                    {
+                        if (const auto error =
+                                m_threadMaterializationCoordinator->enqueueMailboxWindow(
+                                    change.accountId.toStdString(), window.queryKey.toStdString(),
+                                    window.offset, window.limit))
+                            qWarning().noquote()
+                                << "Could not enqueue refreshed mailbox Thread materialization"
+                                << error->message;
+                    }
+                });
     }
 
     MailMutationApplicationService::MailMutationApplicationService(
@@ -2004,7 +1982,7 @@ namespace javelin::app
 
             auto operation = [this, intent]() mutable -> QCoro::Task<MailboxWindowResult>
             {
-                while (true)
+                for (unsigned int attempt = 0; attempt < 3; ++attempt)
                 {
                     auto result = co_await executeMailboxWindowNetwork(intent);
                     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -2013,6 +1991,12 @@ namespace javelin::app
                         co_return *summary;
                     co_await yieldMailQueryRetry();
                 }
+
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::Conflict,
+                    .message =
+                        i18n("Mail changed repeatedly while loading this view. Please try again."),
+                };
             };
             auto task = operation();
             QCoro::connect(std::move(task), this,
@@ -2409,14 +2393,12 @@ namespace javelin::app
 
         auto operation = [this, intent, leaseKey]() mutable -> QCoro::Task<SearchWindowResult>
         {
-            while (true)
+            for (unsigned int attempt = 0; attempt < 3; ++attempt)
             {
                 if (searchWindowRetired(leaseKey))
-                {
                     co_return javelin::jmap::OperationError{
                         .message = i18n("The search tab has been closed."),
                     };
-                }
                 auto result = co_await executeSearchWindowNetwork(intent, leaseKey);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                     co_return *error;
@@ -2424,6 +2406,11 @@ namespace javelin::app
                     co_return *summary;
                 co_await yieldMailQueryRetry();
             }
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
+                .message =
+                    i18n("Mail changed repeatedly while loading this view. Please try again."),
+            };
         };
         auto task = operation();
         QCoro::connect(std::move(task), this, [this, key, generation](SearchWindowResult result)

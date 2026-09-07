@@ -85,12 +85,49 @@ namespace javelin::app
         {
             auto change = std::move(m_pending.front());
             m_pending.pop_front();
-            Q_EMIT invalidated(MailCacheInvalidation{
-                .epoch = 0,
-                .changedDomains = changedDomains(change),
-                .affectedKeys = affectedKeys(change),
-                .change = std::move(change),
-            });
+            auto mailboxWindows = std::move(change.queryWindows);
+            auto searchWindows = std::move(change.searchWindows);
+            change.queryWindows.clear();
+            change.searchWindows.clear();
+            const auto maximum = javelin::protocol::BoundaryLimits{}.maximumCollectionItems;
+            std::size_t mailboxOffset = 0;
+            std::size_t searchOffset = 0;
+            do
+            {
+                auto batch = change;
+                // Leave room for bounded account, mailbox, content and affected-key fields.
+                const auto byteBudget = javelin::protocol::BoundaryLimits{}.maximumFrameBytes / 8;
+                std::size_t windowBytes = 0;
+                while (mailboxOffset < mailboxWindows.size() && batch.queryWindows.size() < maximum)
+                {
+                    const auto& window = mailboxWindows[mailboxOffset];
+                    const auto bytes = static_cast<std::size_t>(window.mailboxId.toUtf8().size() +
+                                                                window.queryKey.toUtf8().size()) +
+                                       32;
+                    if (windowBytes + bytes > byteBudget && !batch.queryWindows.empty())
+                        break;
+                    windowBytes += bytes;
+                    batch.queryWindows.push_back(std::move(mailboxWindows[mailboxOffset++]));
+                }
+                while (searchOffset < searchWindows.size() && batch.searchWindows.size() < maximum)
+                {
+                    const auto& window = searchWindows[searchOffset];
+                    const auto bytes =
+                        static_cast<std::size_t>(window.queryKey.toUtf8().size()) + 32;
+                    if (windowBytes + bytes > byteBudget &&
+                        (!batch.queryWindows.empty() || !batch.searchWindows.empty()))
+                        break;
+                    windowBytes += bytes;
+                    batch.searchWindows.push_back(std::move(searchWindows[searchOffset++]));
+                }
+                Q_EMIT invalidated(MailCacheInvalidation{
+                    .epoch = 0,
+                    .changedDomains = changedDomains(batch),
+                    .affectedKeys = affectedKeys(batch),
+                    .change = std::move(batch),
+                });
+                change.background = {};
+            } while (mailboxOffset < mailboxWindows.size() || searchOffset < searchWindows.size());
         }
     }
 

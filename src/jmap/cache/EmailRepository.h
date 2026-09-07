@@ -59,6 +59,8 @@ namespace javelin::jmap::cache
         listMailboxEmailIds(std::string_view accountId, std::string_view mailboxId) const;
         [[nodiscard]] std::variant<std::optional<javelin::jmap::domain::Email>, DatabaseError>
         find(std::string_view accountId, std::string_view emailId) const;
+        [[nodiscard]] std::variant<std::vector<javelin::jmap::domain::Email>, DatabaseError>
+        findMany(std::string_view accountId, std::span<const std::string> emailIds) const;
 
       private:
         DatabaseConnection& m_connection;
