@@ -659,6 +659,16 @@ TEST_CASE("offline full sync publishes reconciliation effects for a confirmed un
                    (*record)->status == javelin::app::WorkStatus::Complete;
         }));
 
+    REQUIRE(waitUntil(
+        [&]()
+        {
+            const auto job = scheduler.find(mailIndexJobId());
+            const auto* record = std::get_if<std::optional<javelin::app::WorkRecord>>(&job);
+            return record != nullptr && record->has_value() &&
+                   (*record)->status == javelin::app::WorkStatus::Complete;
+        },
+        10000));
+
     REQUIRE(committedEffects.has_value());
     CHECK(committedEffects->mailboxMembershipChanged);
     CHECK(std::find(committedEffects->affectedMailboxIds.begin(),

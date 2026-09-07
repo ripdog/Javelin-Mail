@@ -348,41 +348,42 @@ namespace javelin::jmap::sync
         {
             if (cancellation.isCancelled())
                 co_return stream.summary();
-            if (reply == nullptr)
+            auto* activeReply = reply.data();
+            if (activeReply == nullptr)
             {
                 co_return makeTransportError(javelin::jmap::api::TransportErrorCode::Cancelled,
                                              "Event-source reply was destroyed.");
             }
 
-            if (reply->error() != QNetworkReply::NoError && reply->isFinished())
+            if (activeReply->error() != QNetworkReply::NoError && activeReply->isFinished())
             {
                 qWarning().noquote()
-                    << "State-change source network error" << reply->url().toString()
-                    << reply->error() << reply->errorString()
-                    << reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()
-                    << summarizeBody(reply->readAll());
-                co_return mapReplyError(*reply);
+                    << "State-change source network error" << activeReply->url().toString()
+                    << activeReply->error() << activeReply->errorString()
+                    << activeReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()
+                    << summarizeBody(activeReply->readAll());
+                co_return mapReplyError(*activeReply);
             }
 
             const auto currentStatusAttribute =
-                reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+                activeReply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
             const int statusCode =
                 currentStatusAttribute.isValid() ? currentStatusAttribute.toInt() : 0;
             if (!responseHeadersValidated && currentStatusAttribute.isValid())
             {
                 if (statusCode < 200 || statusCode >= 300)
                 {
-                    const QByteArray responseBody = reply->readAll();
+                    const QByteArray responseBody = activeReply->readAll();
                     qWarning().noquote()
-                        << "State-change source HTTP failure" << reply->url().toString()
+                        << "State-change source HTTP failure" << activeReply->url().toString()
                         << statusCode << summarizeBody(responseBody);
                     co_return makeTransportError(
                         javelin::jmap::api::TransportErrorCode::HttpFailure,
-                        reply->errorString().toStdString(), statusCode);
+                        activeReply->errorString().toStdString(), statusCode);
                 }
 
                 const auto contentType =
-                    reply->header(QNetworkRequest::ContentTypeHeader).toString();
+                    activeReply->header(QNetworkRequest::ContentTypeHeader).toString();
                 if (!contentType.startsWith(QStringLiteral("text/event-stream"),
                                             Qt::CaseInsensitive))
                 {
@@ -399,29 +400,29 @@ namespace javelin::jmap::sync
                 }
             }
 
-            if (!reply->isFinished() && reply->bytesAvailable() == 0)
+            if (!activeReply->isFinished() && activeReply->bytesAvailable() == 0)
             {
-                const bool ready =
-                    co_await qCoro(reply.data()).waitForReadyRead(activity.timeout());
-                if (reply == nullptr)
+                const bool ready = co_await qCoro(activeReply).waitForReadyRead(activity.timeout());
+                activeReply = reply.data();
+                if (activeReply == nullptr)
                 {
                     co_return makeTransportError(javelin::jmap::api::TransportErrorCode::Cancelled,
                                                  "Event-source reply was destroyed.");
                 }
-                if (!ready && !reply->isFinished())
+                if (!ready && !activeReply->isFinished())
                 {
-                    reply->abort();
+                    activeReply->abort();
                     qWarning().noquote()
                         << "State-change source timed out waiting for event-source activity"
-                        << reply->url().toString();
+                        << activeReply->url().toString();
                     co_return makeTransportError(
                         javelin::jmap::api::TransportErrorCode::NetworkFailure,
                         "Timed out waiting for event-source activity.");
                 }
 
-                if (!ready && reply->isFinished())
+                if (!ready && activeReply->isFinished())
                 {
-                    const QByteArray chunk = reply->readAll();
+                    const QByteArray chunk = activeReply->readAll();
                     if (!chunk.isEmpty())
                     {
                         activity.recordActivity();
@@ -430,7 +431,7 @@ namespace javelin::jmap::sync
                 }
                 else if (ready)
                 {
-                    const QByteArray chunk = reply->readAll();
+                    const QByteArray chunk = activeReply->readAll();
                     if (!chunk.isEmpty())
                     {
                         activity.recordActivity();
@@ -440,7 +441,7 @@ namespace javelin::jmap::sync
             }
             else
             {
-                const QByteArray chunk = reply->readAll();
+                const QByteArray chunk = activeReply->readAll();
                 if (!chunk.isEmpty())
                 {
                     activity.recordActivity();
