@@ -72,15 +72,25 @@ jobs:
             org.kde.Sdk//6.10 \
             org.kde.Platform//6.10 \
             io.qt.qtwebengine.BaseApp//6.10
-          flatpak update --noninteractive --commit="$KDE_SDK_COMMIT" org.kde.Sdk//6.10
-          flatpak update --noninteractive --commit="$KDE_PLATFORM_COMMIT" org.kde.Platform//6.10
-          flatpak update --noninteractive --commit="$QTWEBENGINE_BASEAPP_COMMIT" io.qt.qtwebengine.BaseApp//6.10
+          # Pin each ref independently. Without --no-deps, pinning BaseApp can
+          # update org.kde.Platform again and silently undo the minimum pin.
+          flatpak update --noninteractive --no-deps --commit="$KDE_SDK_COMMIT" org.kde.Sdk//6.10
+          flatpak update --noninteractive --no-deps --commit="$QTWEBENGINE_BASEAPP_COMMIT" io.qt.qtwebengine.BaseApp//6.10
+          flatpak update --noninteractive --no-deps --commit="$KDE_PLATFORM_COMMIT" org.kde.Platform//6.10
 
       - name: Verify minimum dependency versions
         run: |
-          test "$(flatpak info --show-commit org.kde.Sdk//6.10)" = "$KDE_SDK_COMMIT"
-          test "$(flatpak info --show-commit org.kde.Platform//6.10)" = "$KDE_PLATFORM_COMMIT"
-          test "$(flatpak info --show-commit io.qt.qtwebengine.BaseApp//6.10)" = "$QTWEBENGINE_BASEAPP_COMMIT"
+          verify_commit() {
+            ref="$1"
+            expected="$2"
+            actual="$(flatpak info --show-commit "$ref")"
+            printf '%s: %s\n' "$ref" "$actual"
+            test "$actual" = "$expected"
+          }
+
+          verify_commit org.kde.Sdk//6.10 "$KDE_SDK_COMMIT"
+          verify_commit org.kde.Platform//6.10 "$KDE_PLATFORM_COMMIT"
+          verify_commit io.qt.qtwebengine.BaseApp//6.10 "$QTWEBENGINE_BASEAPP_COMMIT"
           flatpak run --command=sh org.kde.Sdk//6.10 -c '
             set -eu
             test "$(qtpaths6 --qt-version)" = "6.10.3"
