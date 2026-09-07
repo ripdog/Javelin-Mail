@@ -57,9 +57,11 @@ configure_file(
     @ONLY
 )
 
-find_package(KF6 ${JAVELIN_MIN_KF_VERSION} REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons I18n JobWidgets KIO Sonnet TextEditor Wallet WidgetsAddons)
+find_package(KF6 ${JAVELIN_MIN_KF_VERSION} REQUIRED COMPONENTS Codecs Config ConfigWidgets XmlGui CoreAddons I18n JobWidgets KIO Sonnet TextEditor Wallet WidgetsAddons)
 find_package(KF6Mime ${JAVELIN_MIN_KF_VERSION} REQUIRED)
 find_package(KPim6MessageComposer ${JAVELIN_MIN_PIM_VERSION} REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(CANBERRA REQUIRED IMPORTED_TARGET libcanberra)
 
 qt_standard_project_setup()
 
@@ -470,6 +472,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/MailboxMaintenanceRegistry.h
     src/desktop/notifications/DesktopNotificationController.cpp
     src/desktop/notifications/DesktopNotificationController.h
+    src/desktop/notifications/KdeNotificationIntegration.cpp
+    src/desktop/notifications/KdeNotificationIntegration.h
     src/app/messages/FullMailSyncService.cpp
     src/app/FullMailSyncService.h
     src/app/undo/HistoryRepository.cpp
@@ -1930,6 +1934,8 @@ add_library(javelin_daemon_core STATIC
     src/app/ContactCommandService.h
     src/desktop/notifications/DesktopNotificationController.cpp
     src/desktop/notifications/DesktopNotificationController.h
+    src/desktop/notifications/KdeNotificationIntegration.cpp
+    src/desktop/notifications/KdeNotificationIntegration.h
     src/app/messages/FullMailSyncService.cpp
     src/app/FullMailSyncService.h
     src/app/undo/HistoryRepository.cpp
@@ -2048,8 +2054,10 @@ target_link_libraries(javelin_daemon_core
         Qt::Concurrent
         Qt::DBus
         Qt::Network
+        KF6::ConfigCore
         KF6::I18n
         KF6::Wallet
+        PkgConfig::CANBERRA
         glaze::glaze
         javelin_observability
 )
@@ -2376,6 +2384,7 @@ set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javeli
 set(_local_kxmlgui_runtime_dir
     "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/kxmlgui/javelinmail")
 set(_local_icon_theme_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_ICONDIR}")
+set(_local_knotifyrc_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KNOTIFYRCDIR}")
 if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
     set(_ssplit_prefix_source_dir
         "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/3rd_party/ssplit-cpp/nonbreaking_prefixes")
@@ -2403,6 +2412,10 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
             "${_local_kxmlgui_runtime_dir}/javelinmailui.rc"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_knotifyrc_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/res/javelinmail.notifyrc"
+            "${_local_knotifyrc_dir}/javelinmail.notifyrc"
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${_local_icon_theme_dir}/hicolor/scalable/apps"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -2416,6 +2429,7 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
         COMMAND ${CMAKE_COMMAND} -E touch "${_install_data_stamp}"
         DEPENDS
             "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
+            "${PROJECT_SOURCE_DIR}/res/javelinmail.notifyrc"
             "${PROJECT_SOURCE_DIR}/res/icon.svg"
             "${PROJECT_SOURCE_DIR}/res/models/fasttext/LICENSE"
             "${JAVELIN_FASTTEXT_SOURCE_MODEL_PATH}"
@@ -2538,6 +2552,10 @@ endif()
 
 install(FILES res/javelinmail.desktop
     DESTINATION ${KDE_INSTALL_APPDIR}
+)
+
+install(FILES res/javelinmail.notifyrc
+    DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR}
 )
 
 install(FILES res/app.javelin.JavelinMail.metainfo.xml

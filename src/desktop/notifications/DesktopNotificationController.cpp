@@ -1,5 +1,7 @@
 #include "desktop/notifications/DesktopNotificationController.h"
 
+#include "desktop/notifications/KdeNotificationIntegration.h"
+
 #include <KLocalizedString>
 
 #include <QCoreApplication>
@@ -27,12 +29,30 @@ namespace javelin::app
         constexpr auto markReadActionKey = "mark-read";
         constexpr auto replyActionKey = "reply";
         constexpr auto notificationIconName = "mail-unread";
-        constexpr auto desktopEntryName = "javelinmail";
+        constexpr auto nativeDesktopEntryName = "javelinmail";
+        constexpr auto notificationApplicationName = "javelinmail";
+        constexpr auto newMailEventId = "new-mail";
+        constexpr auto calendarReminderEventId = "calendar-reminder";
+        constexpr auto calendarInvitationEventId = "calendar-invitation";
+        constexpr auto errorEventId = "error";
+        constexpr auto undoSendEventId = "undo-send";
+        constexpr auto newMailCategory = "email.arrived";
+        constexpr auto calendarReminderCategory = "x-javelin.calendar.reminder";
+        constexpr auto calendarInvitationCategory = "x-javelin.calendar.invitation";
+        constexpr auto errorCategory = "x-javelin.error";
+        constexpr auto undoSendCategory = "x-javelin.email.undo-send";
+        constexpr auto newMailSoundName = "message-new-instant";
         constexpr auto defaultTimeoutMs = -1;
         constexpr auto urgencyNormal = 1;
         constexpr auto urgencyCritical = 2;
         constexpr auto dismissedByUserReason = 2U;
         constexpr auto undoActionPrefix = "undo-send:";
+
+        [[nodiscard]] QString desktopEntryName()
+        {
+            const auto flatpakId = qEnvironmentVariable("FLATPAK_ID");
+            return flatpakId.isEmpty() ? QString::fromLatin1(nativeDesktopEntryName) : flatpakId;
+        }
 
         [[nodiscard]] QString undoActionKey(const QString& sendId)
         {
@@ -69,10 +89,34 @@ namespace javelin::app
         class FreedesktopNotificationTransport final : public DesktopNotificationTransport
         {
           public:
-            std::variant<uint, QString> send(const QString& icon, const QString& summary,
-                                             const QString& message, const QStringList& actions,
-                                             const QVariantMap& hints, const int timeoutMs) override
+            DesktopNotificationDeliveryResult
+            send(const QString& icon, const QString& summary, const QString& message,
+                 const QStringList& actions, const QVariantMap& hints, const int timeoutMs) override
             {
+                auto serverHints = hints;
+                const auto eventId = serverHints.value(QStringLiteral("x-kde-eventId")).toString();
+                const auto fallbackSoundName =
+                    serverHints.take(QStringLiteral("sound-name")).toString();
+                const auto presentation = eventId.isEmpty()
+                                              ? KdeNotificationPresentation{
+                                                    .popup = true,
+                                                    .sound = !fallbackSoundName.isEmpty(),
+                                                    .soundName = fallbackSoundName,
+                                                }
+                                              : m_kdeIntegration.presentationFor(eventId,
+                                                                                 fallbackSoundName);
+
+                bool soundDelivered = true;
+                if (presentation.sound)
+                    soundDelivered = m_kdeIntegration.playSound(presentation.soundName);
+
+                if (!presentation.popup)
+                {
+                    if (presentation.sound && !soundDelivered)
+                        qWarning() << "Desktop notification sound could not be played";
+                    return DesktopNotificationDelivery{.notificationId = std::nullopt};
+                }
+
                 QDBusInterface notifications{QString::fromLatin1(notificationsService),
                                              QString::fromLatin1(notificationsPath),
                                              QString::fromLatin1(notificationsInterface),
@@ -82,10 +126,13 @@ namespace javelin::app
 
                 const QDBusReply<uint> reply{notifications.call(
                     QStringLiteral("Notify"), i18n("Javelin Mail"), static_cast<uint>(0), icon,
-                    summary, message, actions, hints, timeoutMs)};
+                    summary, message, actions, serverHints, timeoutMs)};
                 if (!reply.isValid())
                     return reply.error().message();
-                return reply.value();
+                if (!soundDelivered)
+                    qWarning()
+                        << "Desktop notification popup was delivered without its configured sound";
+                return DesktopNotificationDelivery{.notificationId = reply.value()};
             }
 
             [[nodiscard]] bool supportsActions() const override
@@ -112,6 +159,11 @@ namespace javelin::app
                     static_cast<void>(
                         notifications.call(QStringLiteral("CloseNotification"), notificationId));
             }
+
+          private:
+            KdeNotificationIntegration m_kdeIntegration{
+                QString::fromLatin1(notificationApplicationName), QStringLiteral("Javelin Mail"),
+                desktopEntryName(), QStringLiteral("javelinmail")};
         };
     } // namespace
 
@@ -182,14 +234,20 @@ namespace javelin::app
         // never open. Open and Reply still receive a usable token without an application id.
         const auto sent = m_transport->send(
             QString::fromLatin1(notificationIconName), summary, message, actions,
-            notificationHints(urgencyNormal, actions.isEmpty()), defaultTimeoutMs);
+            notificationHints(QString::fromLatin1(newMailEventId),
+                              QString::fromLatin1(newMailCategory), urgencyNormal,
+                              actions.isEmpty(), false, QString::fromLatin1(newMailSoundName)),
+            defaultTimeoutMs);
         if (const auto* error = std::get_if<QString>(&sent))
         {
             qWarning().noquote() << "Failed to send desktop notification" << *error;
             return false;
         }
 
-        const auto notificationId = std::get<uint>(sent);
+        const auto& delivery = std::get<DesktopNotificationDelivery>(sent);
+        if (!delivery.notificationId.has_value())
+            return true;
+        const auto notificationId = *delivery.notificationId;
         m_trackedNotifications.insert_or_assign(notificationId, TrackedNotification{
                                                                     .accountId = accountId,
                                                                     .mailboxId = mailboxId,
@@ -221,27 +279,31 @@ namespace javelin::app
                 ? QStringList{QString::fromLatin1(defaultActionKey),
                               i18nc("@action:button desktop notification", "Open Settings")}
                 : QStringList{};
-        const auto sent =
-            m_transport->send(QStringLiteral("dialog-warning"), title, message, actions,
-                              notificationHints(persistent ? urgencyCritical : urgencyNormal),
-                              persistent ? 0 : defaultTimeoutMs);
+        const auto sent = m_transport->send(
+            QStringLiteral("dialog-warning"), title, message, actions,
+            notificationHints(QString::fromLatin1(errorEventId), QString::fromLatin1(errorCategory),
+                              persistent ? urgencyCritical : urgencyNormal),
+            persistent ? 0 : defaultTimeoutMs);
         if (const auto* error = std::get_if<QString>(&sent))
         {
             qWarning().noquote() << "Failed to send error notification" << *error;
             return;
         }
 
+        const auto& delivery = std::get<DesktopNotificationDelivery>(sent);
+        if (!delivery.notificationId.has_value())
+            return;
         m_trackedNotifications.insert_or_assign(
-            std::get<uint>(sent), TrackedNotification{.accountId = {},
-                                                      .mailboxId = {},
-                                                      .mailboxName = {},
-                                                      .threadId = {},
-                                                      .emailId = {},
-                                                      .activationToken = {},
-                                                      .connectionId = connectionId,
-                                                      .calendarNotificationKey = {},
-                                                      .sendId = {},
-                                                      .opensSettings = opensSettings});
+            *delivery.notificationId, TrackedNotification{.accountId = {},
+                                                          .mailboxId = {},
+                                                          .mailboxName = {},
+                                                          .threadId = {},
+                                                          .emailId = {},
+                                                          .activationToken = {},
+                                                          .connectionId = connectionId,
+                                                          .calendarNotificationKey = {},
+                                                          .sendId = {},
+                                                          .opensSettings = opensSettings});
     }
 
     bool DesktopNotificationController::notifyCalendarEvent(const QString& key,
@@ -251,14 +313,20 @@ namespace javelin::app
         const QStringList actions = {
             QStringLiteral("dismiss"), i18nc("@action:button desktop notification", "Dismiss"),
             QStringLiteral("snooze"), i18nc("@action:button desktop notification", "Snooze 5 min")};
-        const auto sent = m_transport->send(QStringLiteral("x-office-calendar"), title, message,
-                                            actions, notificationHints(urgencyNormal, false), 0);
+        const auto sent = m_transport->send(
+            QStringLiteral("x-office-calendar"), title, message, actions,
+            notificationHints(QString::fromLatin1(calendarReminderEventId),
+                              QString::fromLatin1(calendarReminderCategory), urgencyNormal, false),
+            0);
         if (const auto* error = std::get_if<QString>(&sent))
         {
             qWarning().noquote() << "Failed to send calendar notification" << *error;
             return false;
         }
-        m_trackedNotifications.insert_or_assign(std::get<uint>(sent),
+        const auto& delivery = std::get<DesktopNotificationDelivery>(sent);
+        if (!delivery.notificationId.has_value())
+            return true;
+        m_trackedNotifications.insert_or_assign(*delivery.notificationId,
                                                 TrackedNotification{.accountId = {},
                                                                     .mailboxId = {},
                                                                     .mailboxName = {},
@@ -284,13 +352,19 @@ namespace javelin::app
         };
         const auto sent = m_transport->send(
             QStringLiteral("x-office-calendar"), i18n("Calendar invitation: %1", title), message,
-            actions, notificationHints(urgencyNormal, true, false), 0);
+            actions,
+            notificationHints(QString::fromLatin1(calendarInvitationEventId),
+                              QString::fromLatin1(calendarInvitationCategory), urgencyNormal, true),
+            0);
         if (const auto* error = std::get_if<QString>(&sent))
         {
             qWarning().noquote() << "Failed to send calendar invitation notification" << *error;
             return false;
         }
-        const auto notificationId = std::get<uint>(sent);
+        const auto& delivery = std::get<DesktopNotificationDelivery>(sent);
+        if (!delivery.notificationId.has_value())
+            return true;
+        const auto notificationId = *delivery.notificationId;
         m_invitationNotificationIds.insert(key, notificationId);
         m_trackedNotifications.insert_or_assign(
             notificationId, TrackedNotification{.accountId = {},
@@ -340,12 +414,17 @@ namespace javelin::app
                                      i18nc("@action:button desktop notification", "Undo Send")};
         // Plasma retains non-transient notifications in history after the popup disappears, so
         // NotificationClosed is not emitted when their display timeout ends.
-        const auto sent =
-            m_transport->send(QStringLiteral("mail-send"), title, message, actions,
-                              notificationHints(urgencyNormal, false, true), timeoutMs);
+        const auto sent = m_transport->send(QStringLiteral("mail-send"), title, message, actions,
+                                            notificationHints(QString::fromLatin1(undoSendEventId),
+                                                              QString::fromLatin1(undoSendCategory),
+                                                              urgencyNormal, false, true),
+                                            timeoutMs);
         if (std::holds_alternative<QString>(sent))
             return false;
-        const auto notificationId = std::get<uint>(sent);
+        const auto& delivery = std::get<DesktopNotificationDelivery>(sent);
+        if (!delivery.notificationId.has_value())
+            return false;
+        const auto notificationId = *delivery.notificationId;
         m_sendNotificationIds.insert(sendId, notificationId);
         m_trackedNotifications.insert_or_assign(notificationId,
                                                 TrackedNotification{.accountId = {},
@@ -537,14 +616,21 @@ namespace javelin::app
     }
 
     QVariantMap DesktopNotificationController::notificationHints(
-        const int urgency, const bool associateWithDesktopEntry, const bool transient) const
+        const QString& eventId, const QString& category, const int urgency,
+        const bool associateWithDesktopEntry, const bool transient, const QString& soundName) const
     {
         QVariantMap hints;
+        hints.insert(QStringLiteral("x-kde-appname"),
+                     QString::fromLatin1(notificationApplicationName));
+        hints.insert(QStringLiteral("x-kde-eventId"), eventId);
+        hints.insert(QStringLiteral("category"), category);
         if (associateWithDesktopEntry)
-            hints.insert(QStringLiteral("desktop-entry"), QString::fromLatin1(desktopEntryName));
+            hints.insert(QStringLiteral("desktop-entry"), desktopEntryName());
         hints.insert(QStringLiteral("urgency"), urgency);
         if (transient)
             hints.insert(QStringLiteral("transient"), true);
+        if (!soundName.isEmpty())
+            hints.insert(QStringLiteral("sound-name"), soundName);
         hints.insert(QStringLiteral("sender-pid"),
                      static_cast<qlonglong>(QCoreApplication::applicationPid()));
         return hints;

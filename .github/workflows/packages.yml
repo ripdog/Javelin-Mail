@@ -149,6 +149,7 @@ jobs:
             kconfigwidgets \
             kcoreaddons \
             kmime \
+            libcanberra \
             messagelib \
             ktexteditor \
             kxmlgui \

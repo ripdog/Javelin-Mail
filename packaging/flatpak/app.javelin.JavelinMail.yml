@@ -14,8 +14,11 @@ finish-args:
   - --share=network
   - --socket=wayland
   - --socket=fallback-x11
+  - --socket=pulseaudio
   - --device=dri
   - --filesystem=xdg-download:create
+  - --filesystem=xdg-config/kdeglobals:ro
+  - --filesystem=xdg-config/javelinmail.notifyrc:ro
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.portal.Desktop
   - --talk-name=org.kde.StatusNotifierWatcher
@@ -311,6 +314,7 @@ modules:
       - sed -i 's/^Exec=.*/Exec=javelin-flatpak/' /app/share/applications/app.javelin.JavelinMail.desktop
       - sed -i 's/^Icon=.*/Icon=app.javelin.JavelinMail/' /app/share/applications/app.javelin.JavelinMail.desktop
       - cp /app/share/icons/hicolor/scalable/apps/javelinmail.svg /app/share/icons/hicolor/scalable/apps/app.javelin.JavelinMail.svg
+      - sed -i 's/^DesktopEntry=javelinmail$/DesktopEntry=app.javelin.JavelinMail/' /app/share/knotifications6/javelinmail.notifyrc
       - sed -i 's#javelinmail.desktop#app.javelin.JavelinMail.desktop#' /app/share/metainfo/app.javelin.JavelinMail.metainfo.xml
     sources:
       - type: dir

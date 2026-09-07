@@ -28,8 +28,9 @@ host CMake environment.
 ## Dependencies
 
 Required Qt components are Core, DBus, Network, SQL, Widgets, PrintSupport, Concurrent,
-LinguistTools, WebEngine, SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, I18n, JobWidgets, KIO, Sonnet,
-TextEditor, Wallet, WidgetsAddons, Extra CMake Modules, KF6Mime, and KPim6MessageComposer. The supported
+LinguistTools, WebEngine, SVG, and WebSockets. Required KDE components are Config/Core, ConfigWidgets, XmlGui, CoreAddons, I18n, JobWidgets, KIO, Sonnet,
+TextEditor, Wallet, WidgetsAddons, Extra CMake Modules, KF6Mime, and KPim6MessageComposer. libcanberra
+provides notification sound-theme playback. The supported
 minimum is intentionally the oldest dependency stack built in CI, not an inferred API floor: Qt 6.10,
 Frameworks/ECM/KMime 6.27, and PIM 6.8. These are
 product dependencies, not merely build conveniences: KXMLGUI owns the main-window action layout,
@@ -55,7 +56,7 @@ A suitable base environment can be installed with:
 sudo pacman -S --needed \
   base-devel ccache cmake extra-cmake-modules git ninja \
   qt6-base qt6-svg qt6-tools qt6-webengine qt6-websockets \
-  kconfigwidgets kcoreaddons kio kjobwidgets ktexteditor kxmlgui kmime messagelib \
+  kconfigwidgets kcoreaddons kio kjobwidgets ktexteditor kxmlgui kmime libcanberra messagelib \
   blas cblas lapack zstd
 ```
 

@@ -1,4 +1,5 @@
 #include "desktop/notifications/DesktopNotificationController.h"
+#include "desktop/notifications/KdeNotificationIntegration.h"
 
 #include "app/AccountRuntimeManager.h"
 #include "app/CacheLocationProvider.h"
@@ -17,9 +18,11 @@
 #include <QDateTime>
 #include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QMetaObject>
 #include <QSettings>
 #include <QSqlQuery>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -52,6 +55,30 @@ namespace
         std::unique_ptr<QCoreApplication> m_application;
     };
 
+    class ScopedEnvironmentVariable
+    {
+      public:
+        ScopedEnvironmentVariable(QByteArray name, QByteArray value)
+            : m_name(std::move(name)), m_wasSet(qEnvironmentVariableIsSet(m_name.constData())),
+              m_previous(qgetenv(m_name.constData()))
+        {
+            qputenv(m_name.constData(), value);
+        }
+
+        ~ScopedEnvironmentVariable()
+        {
+            if (m_wasSet)
+                qputenv(m_name.constData(), m_previous);
+            else
+                qunsetenv(m_name.constData());
+        }
+
+      private:
+        QByteArray m_name;
+        bool m_wasSet = false;
+        QByteArray m_previous;
+    };
+
     class ScopedSetting
     {
       public:
@@ -77,6 +104,50 @@ namespace
         QVariant m_previous;
     };
 
+    class ScopedKdeNotificationConfig
+    {
+      public:
+        ScopedKdeNotificationConfig(const QString& applicationName, const QByteArray& installed,
+                                    const QByteArray& user)
+            : m_applicationName(applicationName)
+        {
+            QStandardPaths::setTestModeEnabled(true);
+            const auto dataDirectory =
+                QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+                QStringLiteral("/knotifications6");
+            const auto configDirectory =
+                QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+            REQUIRE(QDir{}.mkpath(dataDirectory));
+            REQUIRE(QDir{}.mkpath(configDirectory));
+            m_installedPath =
+                dataDirectory + QLatin1Char('/') + m_applicationName + QStringLiteral(".notifyrc");
+            m_userPath = configDirectory + QLatin1Char('/') + m_applicationName +
+                         QStringLiteral(".notifyrc");
+            writeFile(m_installedPath, installed);
+            writeFile(m_userPath, user);
+        }
+
+        ~ScopedKdeNotificationConfig()
+        {
+            QFile::remove(m_installedPath);
+            QFile::remove(m_userPath);
+            QStandardPaths::setTestModeEnabled(false);
+        }
+
+      private:
+        static void writeFile(const QString& path, const QByteArray& contents)
+        {
+            QFile file{path};
+            REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            REQUIRE(file.write(contents) == contents.size());
+            file.close();
+        }
+
+        QString m_applicationName;
+        QString m_installedPath;
+        QString m_userPath;
+    };
+
     struct NotificationRequest
     {
         QString icon;
@@ -90,9 +161,9 @@ namespace
     class FakeNotificationTransport final : public javelin::app::DesktopNotificationTransport
     {
       public:
-        std::variant<uint, QString> send(const QString& icon, const QString& summary,
-                                         const QString& message, const QStringList& actions,
-                                         const QVariantMap& hints, const int timeoutMs) override
+        javelin::app::DesktopNotificationDeliveryResult
+        send(const QString& icon, const QString& summary, const QString& message,
+             const QStringList& actions, const QVariantMap& hints, const int timeoutMs) override
         {
             ++sendCount;
             request = NotificationRequest{
@@ -106,7 +177,9 @@ namespace
             notificationId = nextNotificationId++;
             if (sendError.has_value())
                 return *sendError;
-            return notificationId;
+            if (deliverWithoutPopup)
+                return javelin::app::DesktopNotificationDelivery{.notificationId = std::nullopt};
+            return javelin::app::DesktopNotificationDelivery{.notificationId = notificationId};
         }
 
         [[nodiscard]] bool supportsActions() const override
@@ -128,6 +201,7 @@ namespace
         std::size_t sendCount = 0;
         mutable std::size_t supportQueryCount = 0;
         bool actionsSupported = true;
+        bool deliverWithoutPopup = false;
         std::optional<QString> sendError;
         std::optional<NotificationRequest> request;
         std::optional<uint> closedId;
@@ -332,6 +406,14 @@ TEST_CASE("mail notification activation preserves the message route and mailbox 
                       QStringLiteral("Mark Read"), QStringLiteral("reply"),
                       QStringLiteral("Reply")});
     CHECK_FALSE(transportObserver->request->hints.contains(QStringLiteral("desktop-entry")));
+    CHECK(transportObserver->request->hints.value(QStringLiteral("x-kde-appname")).toString() ==
+          QStringLiteral("javelinmail"));
+    CHECK(transportObserver->request->hints.value(QStringLiteral("x-kde-eventId")).toString() ==
+          QStringLiteral("new-mail"));
+    CHECK(transportObserver->request->hints.value(QStringLiteral("category")).toString() ==
+          QStringLiteral("email.arrived"));
+    CHECK(transportObserver->request->hints.value(QStringLiteral("sound-name")).toString() ==
+          QStringLiteral("message-new-instant"));
 
     REQUIRE(QMetaObject::invokeMethod(notificationController, "onActivationToken",
                                       Qt::DirectConnection,
@@ -628,6 +710,29 @@ TEST_CASE("new mail omits actions when the notification service cannot invoke th
           QStringLiteral("javelinmail"));
 }
 
+TEST_CASE("Flatpak notifications advertise the exported desktop entry",
+          "[app][daemon][notification][flatpak]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    const ScopedEnvironmentVariable flatpakId{QByteArrayLiteral("FLATPAK_ID"),
+                                              QByteArrayLiteral("app.javelin.JavelinMail")};
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    observer->actionsSupported = false;
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread"), QStringLiteral("email"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Subject")));
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->request->hints.value(QStringLiteral("desktop-entry")).toString() ==
+          QStringLiteral("app.javelin.JavelinMail"));
+    CHECK(observer->request->hints.value(QStringLiteral("x-kde-appname")).toString() ==
+          QStringLiteral("javelinmail"));
+}
+
 TEST_CASE("notification action capability is cached until the service restarts",
           "[app][daemon][notification][actions]")
 {
@@ -702,6 +807,10 @@ TEST_CASE("calendar invitation notification is persistent open-only and activate
           QStringList{QStringLiteral("default"), QStringLiteral("Open")});
     CHECK(observer->request->timeoutMs == 0);
     CHECK_FALSE(observer->request->hints.value(QStringLiteral("transient")).toBool());
+    CHECK(observer->request->hints.value(QStringLiteral("x-kde-eventId")).toString() ==
+          QStringLiteral("calendar-invitation"));
+    CHECK(observer->request->hints.value(QStringLiteral("category")).toString() ==
+          QStringLiteral("x-javelin.calendar.invitation"));
 
     REQUIRE(QMetaObject::invokeMethod(&controller, "onActivationToken", Qt::DirectConnection,
                                       Q_ARG(uint, observer->notificationId),
@@ -737,6 +846,68 @@ TEST_CASE("undoable send notification reports its actionable lifetime and timeou
           QStringList{QStringLiteral("undo-send:send-1"), QStringLiteral("Undo Send")});
     CHECK(observer->request->hints.value(QStringLiteral("transient")).toBool());
     CHECK_FALSE(observer->request->hints.contains(QStringLiteral("desktop-entry")));
+    CHECK(observer->request->hints.value(QStringLiteral("x-kde-eventId")).toString() ==
+          QStringLiteral("undo-send"));
+    CHECK(observer->request->hints.value(QStringLiteral("category")).toString() ==
+          QStringLiteral("x-javelin.email.undo-send"));
+}
+
+TEST_CASE("KDE event settings override installed notification presentation",
+          "[app][daemon][notification][settings]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    const auto applicationName = QStringLiteral("javelin-notification-settings-test-%1")
+                                     .arg(QCoreApplication::applicationPid());
+    const ScopedKdeNotificationConfig config{
+        applicationName,
+        QByteArrayLiteral("[Event/sound-only]\nAction=Popup|Sound\nSound=message-new-email\n\n"
+                          "[Event/disabled]\nAction=Popup|Sound\nSound=dialog-warning\n\n"
+                          "[Event/empty-sound]\nAction=Popup|Sound\nSound=message-new-email\n"),
+        QByteArrayLiteral("[Event/sound-only]\nAction=Sound\nSound=message-new-instant\n\n"
+                          "[Event/disabled]\nAction=None\n\n"
+                          "[Event/empty-sound]\nAction=Sound\nSound=\n")};
+    const javelin::app::KdeNotificationIntegration integration{
+        applicationName, QStringLiteral("Javelin Mail Test"), QStringLiteral("javelinmail"),
+        QStringLiteral("javelinmail")};
+
+    const auto soundOnly = integration.presentationFor(QStringLiteral("sound-only"));
+    CHECK_FALSE(soundOnly.popup);
+    CHECK(soundOnly.sound);
+    CHECK(soundOnly.soundName == QStringLiteral("message-new-instant"));
+
+    const auto disabled = integration.presentationFor(QStringLiteral("disabled"));
+    CHECK_FALSE(disabled.popup);
+    CHECK_FALSE(disabled.sound);
+
+    const auto emptySound = integration.presentationFor(QStringLiteral("empty-sound"));
+    CHECK_FALSE(emptySound.popup);
+    CHECK(emptySound.sound);
+    CHECK(emptySound.soundName.isEmpty());
+
+    const auto missing = integration.presentationFor(QStringLiteral("missing-event"),
+                                                     QStringLiteral("message-new-email"));
+    CHECK(missing.popup);
+    CHECK(missing.sound);
+    CHECK(missing.soundName == QStringLiteral("message-new-email"));
+}
+
+TEST_CASE("sound-only delivery is accepted for informational notifications but not undo send",
+          "[app][daemon][notification][settings]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    observer->deliverWithoutPopup = true;
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+
+    CHECK(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                   QStringLiteral("thread"), QStringLiteral("email"),
+                                   QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                   QStringLiteral("Subject")));
+    CHECK_FALSE(controller.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
+                                              QStringLiteral("Subject"), 10'000));
 }
 
 TEST_CASE("dialog undo send mode routes a deadline without creating a notification",

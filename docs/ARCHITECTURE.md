@@ -43,7 +43,9 @@ KDE theming:
 - `javelind` implements `org.kde.StatusNotifierItem` directly over QtDBus so tray presence and menu
   actions remain available without loading Qt Widgets in the daemon.
 - Desktop notifications use the freedesktop notification service with stable activation routes back
-  into the KDE GUI.
+  into the KDE GUI. KDE notification event IDs and an installed `javelinmail.notifyrc` expose
+  per-event popup/sound controls in Plasma while the QCoreApplication daemon reads those settings
+  and plays themed sounds without linking the Qt GUI notification stack.
 - On a normal Plasma session, `javelind.service` is attached to the systemd graphical user session.
   Portable packages fall back to launching the adjacent daemon executable because they do not own a
   host systemd unit.
