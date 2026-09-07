@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <unordered_map>
 
 namespace javelin::app
 {
@@ -174,15 +175,28 @@ namespace javelin::app
                 return result;
             }
             javelin::jmap::cache::EmailRepository emailsRepository{connection};
+            auto previousResult = emailsRepository.findMany(accountId, emailIds);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&previousResult))
+                return FullMailboxPageCommit{error->message};
+            auto previousEmails =
+                std::get<std::vector<javelin::jmap::domain::Email>>(std::move(previousResult));
+            std::unordered_map<std::string, javelin::jmap::domain::Email> previousById;
+            previousById.reserve(previousEmails.size());
+            for (auto& previous : previousEmails)
+            {
+                const auto id = previous.id;
+                previousById.emplace(id, std::move(previous));
+            }
+
             javelin::jmap::sync::MailCommitEffects reconciliationEffects;
             for (const auto& email : emails)
             {
-                const auto previous = emailsRepository.find(accountId, email.id);
-                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&previous))
-                    return FullMailboxPageCommit{error->message};
+                const auto previous = previousById.find(email.id);
                 javelin::jmap::sync::accumulateMailCommitEffects(
                     reconciliationEffects,
-                    std::get<std::optional<javelin::jmap::domain::Email>>(previous), email);
+                    previous == previousById.end() ? std::nullopt : std::optional{previous->second},
+                    email);
             }
             if (const auto error = emailsRepository.upsertMany(emailTransaction.cacheTransaction(),
                                                                accountId, emails))
