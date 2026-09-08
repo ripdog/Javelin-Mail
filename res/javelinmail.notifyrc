@@ -1,0 +1,40 @@
+[Global]
+Name=Javelin Mail
+Comment=Javelin Mail notifications
+IconName=javelinmail
+DesktopEntry=javelinmail
+
+[Event/new-mail]
+Name=New mail
+Comment=A new email arrived
+Action=Popup|Sound
+Sound=message-new-instant
+Urgency=Normal
+
+[Event/calendar-reminder]
+Name=Calendar reminder
+Comment=A calendar event reminder is due
+Action=Popup
+Sound=alarm-clock-elapsed
+Urgency=Normal
+
+[Event/calendar-invitation]
+Name=Calendar invitation
+Comment=A calendar invitation was received or changed
+Action=Popup
+Sound=message-new-instant
+Urgency=Normal
+
+[Event/error]
+Name=Errors
+Comment=An operation or account error needs attention
+Action=Popup
+Sound=dialog-warning
+Urgency=Normal
+
+[Event/undo-send]
+Name=Undo Send
+Comment=A sent message can still be cancelled
+Action=Popup
+Sound=dialog-information
+Urgency=Normal

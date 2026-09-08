@@ -14,6 +14,7 @@ depends=(
   'kcoreaddons'
   'kio'
   'kjobwidgets'
+  'libcanberra'
   'ktexteditor'
   'kxmlgui'
   'kmime'

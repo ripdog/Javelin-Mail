@@ -28,12 +28,19 @@ namespace javelin::app
         NotificationServiceLost,
     };
 
+    struct DesktopNotificationDelivery
+    {
+        std::optional<uint> notificationId;
+    };
+
+    using DesktopNotificationDeliveryResult = std::variant<DesktopNotificationDelivery, QString>;
+
     class DesktopNotificationTransport
     {
       public:
         virtual ~DesktopNotificationTransport() = default;
 
-        [[nodiscard]] virtual std::variant<uint, QString>
+        [[nodiscard]] virtual DesktopNotificationDeliveryResult
         send(const QString& icon, const QString& summary, const QString& message,
              const QStringList& actions, const QVariantMap& hints, int timeoutMs) = 0;
         [[nodiscard]] virtual bool supportsActions() const = 0;
@@ -122,9 +129,11 @@ namespace javelin::app
 
         bool connectSignal(const char* signalName, const char* slotName);
         [[nodiscard]] bool transportSupportsActions();
-        [[nodiscard]] QVariantMap notificationHints(int urgency,
+        [[nodiscard]] QVariantMap notificationHints(const QString& eventId, const QString& category,
+                                                    int urgency,
                                                     bool associateWithDesktopEntry = true,
-                                                    bool transient = false) const;
+                                                    bool transient = false,
+                                                    const QString& soundName = {}) const;
         void untrackNotification(uint notificationId);
 
         std::unique_ptr<DesktopNotificationTransport> m_transport;

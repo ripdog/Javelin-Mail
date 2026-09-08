@@ -149,6 +149,7 @@ jobs:
             kconfigwidgets \
             kcoreaddons \
             kmime \
+            libcanberra \
             messagelib \
             ktexteditor \
             kxmlgui \
@@ -174,6 +175,8 @@ jobs:
 
       - name: Build AppImage
         run: |
+          install -d AppDir/usr/lib/libcanberra-0.30
+          cp -a /usr/lib/libcanberra-0.30/. AppDir/usr/lib/libcanberra-0.30/
           install -d tools
           curl -L --fail --retry 3 \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage \
