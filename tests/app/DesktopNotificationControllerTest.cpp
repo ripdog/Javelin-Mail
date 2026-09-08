@@ -109,7 +109,8 @@ namespace
       public:
         ScopedKdeNotificationConfig(const QString& applicationName, const QByteArray& installed,
                                     const QByteArray& user)
-            : m_applicationName(applicationName)
+            : m_applicationName(applicationName),
+              m_testModeWasEnabled(QStandardPaths::isTestModeEnabled())
         {
             QStandardPaths::setTestModeEnabled(true);
             const auto dataDirectory =
@@ -131,7 +132,7 @@ namespace
         {
             QFile::remove(m_installedPath);
             QFile::remove(m_userPath);
-            QStandardPaths::setTestModeEnabled(false);
+            QStandardPaths::setTestModeEnabled(m_testModeWasEnabled);
         }
 
       private:
@@ -144,6 +145,7 @@ namespace
         }
 
         QString m_applicationName;
+        bool m_testModeWasEnabled = false;
         QString m_installedPath;
         QString m_userPath;
     };
