@@ -252,6 +252,11 @@ TEST_CASE("calendar invitation service discovers an occurrence-only invitation",
     javelin::jmap::cache::SessionRepository sessions{connection};
     REQUIRE_FALSE(sessions.replace("owner", calendarSession()).has_value());
     seedCalendarMetadata(connection);
+    const auto baseDate = QDate::currentDate().addDays(1);
+    const auto occurrenceDate = baseDate.addDays(7);
+    const QString baseStart = baseDate.toString(Qt::ISODate) + QStringLiteral("T09:00:00");
+    const QString occurrenceStart =
+        occurrenceDate.toString(Qt::ISODate) + QStringLiteral("T09:00:00");
 
     FakeMethodTransport transport;
     transport.results = {
@@ -265,7 +270,10 @@ TEST_CASE("calendar invitation service discovers an occurrence-only invitation",
             "calendar-invitation-query"),
         response(
             "CalendarEventNotification/get",
-            R"({"accountId":"calendar-account","state":"n1","list":[{"id":"notification-1","created":"2026-08-15T00:00:00Z","changedBy":{"name":"Organizer"},"type":"created","calendarEventId":"series-1","isDraft":false,"event":{"@type":"Event","id":"instance-1","baseEventId":"series-1","recurrenceId":"2026-09-08T09:00:00","uid":"series-uid","calendarIds":{"work":true},"title":"Occurrence invitation","start":"2026-09-08T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"alias":{"@type":"Participant","name":"Alice Alias","calendarAddress":"mailto:alias@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}}],"notFound":[]})",
+            QStringLiteral(
+                R"({"accountId":"calendar-account","state":"n1","list":[{"id":"notification-1","created":"2026-08-15T00:00:00Z","changedBy":{"name":"Organizer"},"type":"created","calendarEventId":"series-1","isDraft":false,"event":{"@type":"Event","id":"instance-1","baseEventId":"series-1","recurrenceId":"%1","uid":"series-uid","calendarIds":{"work":true},"title":"Occurrence invitation","start":"%1","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"participants":{"alias":{"@type":"Participant","name":"Alice Alias","calendarAddress":"mailto:alias@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}}}],"notFound":[]})")
+                .arg(occurrenceStart)
+                .toStdString(),
             "calendar-invitation-notification-get"),
         response(
             "CalendarEvent/query",
@@ -273,7 +281,10 @@ TEST_CASE("calendar invitation service discovers an occurrence-only invitation",
             "calendar-invitation-query"),
         response(
             "CalendarEvent/get",
-            R"({"accountId":"calendar-account","state":"e1","list":[{"@type":"Event","id":"series-1","uid":"series-uid","calendarIds":{"work":true},"title":"Recurring meeting","start":"2026-09-01T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly"},"recurrenceOverrides":{"2026-09-08T09:00:00":{"participants/alias":{"@type":"Participant","name":"Alice Alias","calendarAddress":"mailto:alias@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}},"participants":{"organizer":{"@type":"Participant","name":"Organizer","calendarAddress":"mailto:organizer@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true}}}}],"notFound":[]})",
+            QStringLiteral(
+                R"({"accountId":"calendar-account","state":"e1","list":[{"@type":"Event","id":"series-1","uid":"series-uid","calendarIds":{"work":true},"title":"Recurring meeting","start":"%1","duration":"PT1H","timeZone":"Pacific/Auckland","isDraft":false,"isOrigin":false,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly"},"recurrenceOverrides":{"%2":{"participants/alias":{"@type":"Participant","name":"Alice Alias","calendarAddress":"mailto:alias@example.test","participationStatus":"needs-action","roles":{"attendee":true}}}},"participants":{"organizer":{"@type":"Participant","name":"Organizer","calendarAddress":"mailto:organizer@example.test","participationStatus":"accepted","roles":{"owner":true,"attendee":true}}}}],"notFound":[]})")
+                .arg(baseStart, occurrenceStart)
+                .toStdString(),
             "calendar-invitation-event-get"),
     };
 
@@ -286,8 +297,8 @@ TEST_CASE("calendar invitation service discovers an occurrence-only invitation",
     REQUIRE(signal.has_value());
     CHECK(signal->accountId == QStringLiteral("calendar-account"));
     CHECK(signal->eventId == QStringLiteral("series-1"));
-    CHECK(signal->recurrenceId == QStringLiteral("2026-09-08T09:00:00"));
-    CHECK(signal->navigationDate == QStringLiteral("2026-09-08"));
+    CHECK(signal->recurrenceId == occurrenceStart);
+    CHECK(signal->navigationDate == occurrenceDate.toString(Qt::ISODate));
     CHECK(signal->title == QStringLiteral("Recurring meeting"));
 
     const auto pending = reader.pendingInvitations();
@@ -297,7 +308,7 @@ TEST_CASE("calendar invitation service discovers an occurrence-only invitation",
         std::get<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>(pending);
     REQUIRE(invitations.size() == 1);
     REQUIRE(invitations.front().recurrenceId.has_value());
-    CHECK(invitations.front().recurrenceId->value == "2026-09-08T09:00:00");
+    CHECK(invitations.front().recurrenceId->value == occurrenceStart.toStdString());
     CHECK(invitations.front().selfParticipantId == "alias");
     CHECK(invitations.front().participationStatus == "needs-action");
     CHECK(transport.results.empty());
