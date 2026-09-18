@@ -31,6 +31,21 @@ TEST_CASE("transport failures are classified for application policy")
     CHECK(authentication.code == OperationErrorCode::AuthenticationRequired);
     CHECK(javelin::jmap::isAuthenticationError(authentication));
 
+    const auto disconnectedWithStaleStatus = javelin::jmap::operationError(TransportError{
+        .code = TransportErrorCode::NetworkFailure,
+        .message = "connection disappeared",
+        .httpStatus = 401,
+    });
+    CHECK(disconnectedWithStaleStatus.code == OperationErrorCode::NetworkUnavailable);
+    CHECK_FALSE(javelin::jmap::isAuthenticationError(disconnectedWithStaleStatus));
+
+    const auto secretStoreFailure = javelin::jmap::operationError(javelin::jmap::api::AuthError{
+        .code = javelin::jmap::api::AuthErrorCode::SecretStoreFailure,
+        .message = "could not persist refreshed token",
+    });
+    CHECK(secretStoreFailure.code == OperationErrorCode::LocalStorageFailure);
+    CHECK_FALSE(javelin::jmap::isAuthenticationError(secretStoreFailure));
+
     const auto rateLimit = javelin::jmap::operationError(TransportError{
         .code = TransportErrorCode::HttpFailure,
         .message = "slow down",

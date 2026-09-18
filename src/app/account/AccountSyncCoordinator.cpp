@@ -32,6 +32,7 @@ namespace javelin::app
         constexpr unsigned int notificationBaselineRetryMaximumExponent = 5;
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
+        constexpr auto resumeRecoveryDelay = std::chrono::seconds{10};
 
         class ForegroundWorkScope final
         {
@@ -110,6 +111,14 @@ namespace javelin::app
         QObject::connect(&m_resumeWatchdogTimer, &QTimer::timeout, this,
                          &AccountSyncCoordinator::handleResumeWatchdogTimeout);
         m_resumeWatchdogTimer.start();
+        m_resumeRecoveryTimer.setSingleShot(true);
+        m_resumeRecoveryTimer.setInterval(resumeRecoveryDelay);
+        QObject::connect(&m_resumeRecoveryTimer, &QTimer::timeout, this,
+                         [this]
+                         {
+                             if (m_networkReachable)
+                                 restartForCatchUp();
+                         });
     }
 
     AccountSyncCoordinator::~AccountSyncCoordinator()
@@ -249,6 +258,7 @@ namespace javelin::app
         m_refreshDebounceTimer.stop();
         m_groupwareRetryTimer.stop();
         m_notificationBaselineRetryTimer.stop();
+        m_resumeRecoveryTimer.stop();
         m_pendingRefreshDeadlineMs.reset();
         m_endpointEligibleAtMs.reset();
         m_queuedRefreshDemand = {};
@@ -263,10 +273,30 @@ namespace javelin::app
         setStatus(Status::AuthenticationPaused);
     }
 
+    void AccountSyncCoordinator::networkBecameUnavailable()
+    {
+        if (!m_networkReachable)
+            return;
+        m_networkReachable = false;
+        m_resumeRecoveryTimer.stop();
+        if (m_status == Status::AuthenticationPaused)
+            return;
+
+        const bool shouldCatchUp = hasValidSettings();
+        if (!m_accountId.empty())
+            m_methodTransport.invalidateConnection(m_accountId);
+        stop();
+        m_shouldCatchUpRefreshOnReconnect = shouldCatchUp;
+    }
+
     void AccountSyncCoordinator::networkBecameReachable()
     {
+        m_networkReachable = true;
+        m_resumeRecoveryTimer.stop();
         if (m_runContext != nullptr)
             m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
+        else if (const auto configuration = resolveConfiguration(); configuration.has_value())
+            m_endpointRetryGate.reset(configuration->apiUrl);
         restartForCatchUp();
     }
 
@@ -274,6 +304,11 @@ namespace javelin::app
     {
         if (m_status == Status::AuthenticationPaused)
             return true;
+        if (!m_networkReachable)
+        {
+            m_shouldCatchUpRefreshOnReconnect = true;
+            return true;
+        }
         if (m_runContext == nullptr)
             return false;
         m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
@@ -288,6 +323,11 @@ namespace javelin::app
             return false;
         if (m_status == Status::AuthenticationPaused)
             return true;
+        if (!m_networkReachable)
+        {
+            m_shouldCatchUpRefreshOnReconnect = true;
+            return true;
+        }
         if (m_runContext == nullptr)
             return false;
         m_endpointRetryGate.reset(m_runContext->configuration.apiUrl);
@@ -892,15 +932,19 @@ namespace javelin::app
             return;
         }
 
+        if (!m_networkReachable)
+            return;
+
         qWarning().noquote() << "State-change resume watchdog detected event-loop stall"
-                             << elapsedMs << "ms; restarting source";
-        restartForCatchUp();
+                             << elapsedMs << "ms; waiting for network recovery before restarting";
+        if (!m_resumeRecoveryTimer.isActive())
+            m_resumeRecoveryTimer.start();
     }
 
     void AccountSyncCoordinator::scheduleDebouncedRefresh(const bool forceEmailRefresh,
                                                           std::vector<std::string> mailboxIds)
     {
-        if (!hasValidSettings() || m_runContext == nullptr)
+        if (!m_networkReachable || !hasValidSettings() || m_runContext == nullptr)
             return;
 
         if (forceEmailRefresh)
@@ -1111,7 +1155,7 @@ namespace javelin::app
 
     void AccountSyncCoordinator::restartForCatchUp()
     {
-        if (!hasValidSettings() || m_status == Status::AuthenticationPaused)
+        if (!m_networkReachable || !hasValidSettings() || m_status == Status::AuthenticationPaused)
         {
             return;
         }
@@ -1127,6 +1171,14 @@ namespace javelin::app
 
     void AccountSyncCoordinator::restart()
     {
+        if (!m_networkReachable)
+        {
+            const bool shouldCatchUp = hasValidSettings();
+            stop();
+            m_shouldCatchUpRefreshOnReconnect = shouldCatchUp;
+            return;
+        }
+
         const auto nextConfiguration = resolveConfiguration();
         if (!nextConfiguration.has_value())
         {

@@ -72,6 +72,15 @@ TEST_CASE("work scheduler recovers running work and preserves explicit pauses",
     CHECK_FALSE(pausedRecovery.mayStartBackgroundNetwork());
     pausedRecovery.endForegroundWork();
     CHECK(pausedRecovery.mayStartBackgroundNetwork());
+
+    pausedRecovery.setNetworkReachable(false);
+    CHECK_FALSE(pausedRecovery.mayStartBackgroundNetwork());
+    CHECK_FALSE(pausedRecovery
+                    .admitTransient("offline-foreground", std::nullopt,
+                                    javelin::app::WorkPriority::Foreground)
+                    .has_value());
+    pausedRecovery.setNetworkReachable(true);
+    CHECK(pausedRecovery.mayStartBackgroundNetwork());
 }
 
 TEST_CASE("work scheduler preserves tag deletion jobs across restart",

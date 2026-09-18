@@ -81,7 +81,9 @@ namespace javelin::app
         void
         setAuthenticationRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
         void setMailQueryRefreshPort(MailQueryRefreshPort& port);
+        void networkBecameUnavailable();
         void networkBecameReachable();
+        [[nodiscard]] bool isNetworkReachable() const;
         void setObservedMailboxIds(std::string accountId, std::vector<std::string> mailboxIds);
         [[nodiscard]] std::unordered_map<std::string, AccountSyncCoordinator::Status>
         accountStatuses() const;
@@ -112,6 +114,7 @@ namespace javelin::app
         void notificationEventsCommitted(const QString& accountId);
         void accountConfigured(const QString& accountId);
         void accountRemoved(const QString& accountId);
+        void networkUnavailable();
         void networkReachable();
         void sessionRefreshed(const QString& ownerAccountId);
         void stateChangeCatchUpRequired(const QString& ownerAccountId);
@@ -144,6 +147,7 @@ namespace javelin::app
         std::unordered_map<std::string, unsigned int> m_notificationBaselineRetryAttempts;
         std::unordered_set<std::string> m_notificationBaselineRetriesPending;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
+        bool m_networkReachable = true;
     };
 
 } // namespace javelin::app

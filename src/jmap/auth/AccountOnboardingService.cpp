@@ -1060,7 +1060,7 @@ namespace javelin::jmap::auth
         using FailureKind = javelin::app::OAuthRefreshFailureKind;
         if (!detail::isUsableOAuthRefreshRequest(request))
             co_return refreshError(QStringLiteral("OAuth refresh information is incomplete."),
-                                   FailureKind::ReauthenticationRequired);
+                                   FailureKind::ConfigurationInvalid);
         std::vector<std::pair<QString, QString>> fields{
             {QStringLiteral("grant_type"), QStringLiteral("refresh_token")},
             {QStringLiteral("refresh_token"), request.refreshToken},

@@ -101,6 +101,7 @@ namespace javelin::app
 
         void beginForegroundWork();
         void endForegroundWork();
+        void setNetworkReachable(bool reachable);
         [[nodiscard]] bool mayStartBackgroundNetwork() const;
         [[nodiscard]] QString summary() const override;
         [[nodiscard]] QMetaObject::Connection
@@ -117,6 +118,7 @@ namespace javelin::app
 
         javelin::jmap::cache::DatabaseConnection& m_connection;
         int m_foregroundDepth = 0;
+        bool m_networkReachable = true;
         QTimer m_quietTimer;
         std::uint64_t m_nextAdmissionSequence = 1;
         std::unordered_map<std::string, WorkAdmission> m_admissions;

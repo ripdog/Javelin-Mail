@@ -88,6 +88,7 @@ namespace javelin::app
     {
         None,
         Transient,
+        ConfigurationInvalid,
         ReauthenticationRequired,
     };
 

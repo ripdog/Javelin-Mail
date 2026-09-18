@@ -73,6 +73,7 @@ namespace javelin::app
         cancelNotificationBaseline();
         void stop();
         void pauseForAuthentication();
+        void networkBecameUnavailable();
         void networkBecameReachable();
         [[nodiscard]] bool requestSynchronization();
         [[nodiscard]] bool requestMailboxSynchronization(std::string_view mailboxId);
@@ -242,9 +243,11 @@ namespace javelin::app
         QTimer m_groupwareRetryTimer;
         QTimer m_notificationBaselineRetryTimer;
         QTimer m_resumeWatchdogTimer;
+        QTimer m_resumeRecoveryTimer;
         std::optional<std::vector<std::string>> m_pendingNotificationBaselineMailboxIds;
         unsigned int m_notificationBaselineRetryAttempts = 0;
         qint64 m_lastResumeWatchdogTickMs = 0;
+        bool m_networkReachable = true;
     };
 
 } // namespace javelin::app

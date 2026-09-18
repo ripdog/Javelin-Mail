@@ -1019,6 +1019,8 @@ namespace javelin::app
     {
         if (!isReady() || m_services == nullptr || m_settingsRepository == nullptr)
             return;
+        if (!m_services->accountRuntimeManager().isNetworkReachable())
+            return;
         const auto refreshBefore = QDateTime::currentSecsSinceEpoch() + 300;
         for (const auto& account : m_settingsSnapshot.accounts)
         {

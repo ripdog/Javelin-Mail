@@ -1107,15 +1107,42 @@ namespace javelin::app
         m_mailQueryRefreshPort = &port;
     }
 
+    void AccountRuntimeManager::networkBecameUnavailable()
+    {
+        if (!m_networkReachable)
+            return;
+        m_networkReachable = false;
+        m_workScheduler.setNetworkReachable(false);
+        m_errorCoordinator.networkBecameUnavailable();
+        for (const auto& [accountId, coordinator] : m_coordinators)
+        {
+            static_cast<void>(accountId);
+            coordinator->networkBecameUnavailable();
+        }
+        m_networkAccessManager.clearConnectionCache();
+        Q_EMIT networkUnavailable();
+    }
+
     void AccountRuntimeManager::networkBecameReachable()
     {
+        if (m_networkReachable)
+            return;
+        m_networkReachable = true;
+        m_workScheduler.setNetworkReachable(true);
+        m_errorCoordinator.networkBecameReachable();
         m_networkAccessManager.clearConnectionCache();
         for (const auto& [accountId, coordinator] : m_coordinators)
         {
             static_cast<void>(accountId);
             coordinator->networkBecameReachable();
         }
+        refreshConfiguredSessions();
         Q_EMIT networkReachable();
+    }
+
+    bool AccountRuntimeManager::isNetworkReachable() const
+    {
+        return m_networkReachable;
     }
 
     std::unordered_map<std::string, AccountSyncCoordinator::Status>
@@ -1175,6 +1202,8 @@ namespace javelin::app
 
     void AccountRuntimeManager::refreshConfiguredSessions()
     {
+        if (!m_networkReachable)
+            return;
         javelin::jmap::cache::SessionRepository sessions{m_databaseConnection};
         for (const auto& [accountId, configuration] : m_configurations)
         {
@@ -1200,7 +1229,7 @@ namespace javelin::app
     void AccountRuntimeManager::startSessionRefresh(const std::string& ownerAccountId,
                                                     const AccountConnectionSettings& settings)
     {
-        if (!m_sessionRefreshesInFlight.insert(ownerAccountId).second)
+        if (!m_networkReachable || !m_sessionRefreshesInFlight.insert(ownerAccountId).second)
         {
             return;
         }
@@ -1483,6 +1512,8 @@ namespace javelin::app
                 m_transportCooldowns, m_accountRepository, m_mailboxReader, m_workScheduler,
                 *m_mailQueryRefreshPort, m_endpointRetryGate, m_authenticationRefreshHandler, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
+            if (!m_networkReachable)
+                coordinatorIt->second->networkBecameUnavailable();
         }
         if (m_errorCoordinator.authenticationPaused(configuration.settings.connectionId,
                                                     configuration.settings.revision))

@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QString>
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -25,14 +26,17 @@ namespace javelin::app
         Q_OBJECT
 
       public:
-        explicit ApplicationErrorCoordinator(javelin::jmap::cache::AccountReader& accountReader,
-                                             QObject* parent = nullptr);
+        explicit ApplicationErrorCoordinator(
+            javelin::jmap::cache::AccountReader& accountReader, QObject* parent = nullptr,
+            std::chrono::milliseconds networkRecoveryGrace = std::chrono::seconds{10});
 
         void reportFailure(const AccountConnectionSettings& settings, std::string_view accountId,
                            QString operation, const javelin::jmap::OperationError& error);
         void reportSuccess(std::string_view connectionId);
         void settingsApplied(std::string_view connectionId, std::uint64_t revision);
         void forgetConnection(std::string_view connectionId);
+        void networkBecameUnavailable();
+        void networkBecameReachable();
 
         [[nodiscard]] bool authenticationPaused(std::string_view connectionId,
                                                 std::uint64_t revision) const;
@@ -49,6 +53,8 @@ namespace javelin::app
         [[nodiscard]] static QString serviceIncidentKey(const AccountConnectionSettings& settings);
         [[nodiscard]] static QString serviceName(const AccountConnectionSettings& settings);
         [[nodiscard]] static bool isServiceOutage(const javelin::jmap::OperationError& error);
+        [[nodiscard]] bool
+        networkRecoverySuppressesServiceOutage(const AccountConnectionSettings& settings);
         [[nodiscard]] static QString userTitle(const javelin::jmap::OperationError& error);
         [[nodiscard]] QString accountName(const AccountConnectionSettings& settings,
                                           std::string_view accountId) const;
@@ -61,6 +67,11 @@ namespace javelin::app
         blockedRevision(std::string_view connectionId) const;
 
         javelin::jmap::cache::AccountReader& m_accountReader;
+        std::chrono::milliseconds m_networkRecoveryGrace;
+        bool m_networkReachable = true;
+        std::optional<std::chrono::steady_clock::time_point> m_networkRecoveryStarted;
+        std::unordered_map<std::string, std::chrono::steady_clock::time_point>
+            m_serviceRecoveryFailures;
         std::unordered_set<std::string> m_activeIncidents;
         std::unordered_map<std::string, std::string> m_connectionServices;
     };

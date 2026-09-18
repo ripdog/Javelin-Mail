@@ -69,6 +69,8 @@ namespace javelin::app
                             std::function<QDateTime()> clock = {}, QObject* parent = nullptr);
 
         void start();
+        void networkBecameUnavailable();
+        void networkBecameReachable();
         [[nodiscard]] QCoro::Task<DeferredSendSubmitResult>
         schedule(std::string connectionId, javelin::jmap::submission::PreparedSend prepared,
                  std::chrono::seconds delay);
@@ -107,6 +109,7 @@ namespace javelin::app
         std::function<QDateTime()> m_clock;
         QTimer m_timer;
         QSet<QString> m_notificationGatedSendIds;
+        bool m_networkReachable = true;
         bool m_dispatchRunning = false;
     };
 } // namespace javelin::app

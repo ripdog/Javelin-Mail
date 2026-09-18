@@ -157,7 +157,7 @@ TEST_CASE("OAuth refresh refuses an insecure token endpoint", "[jmap][auth][onbo
 
     CHECK_FALSE(result.succeeded);
     CHECK(result.error == QStringLiteral("OAuth refresh information is incomplete."));
-    CHECK(result.failureKind == javelin::app::OAuthRefreshFailureKind::ReauthenticationRequired);
+    CHECK(result.failureKind == javelin::app::OAuthRefreshFailureKind::ConfigurationInvalid);
 }
 
 TEST_CASE("OAuth refresh accepts legacy grants without a resource indicator",

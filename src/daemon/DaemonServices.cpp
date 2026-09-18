@@ -492,6 +492,11 @@ namespace javelin::app
         m_deferredSendService = std::make_unique<DeferredSendService>(
             *m_deferredSendRepository, *m_deferredSendSubmitter, *m_accountRuntimeManager,
             *m_undoManager);
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::networkUnavailable,
+                         m_deferredSendService.get(),
+                         &DeferredSendService::networkBecameUnavailable);
+        QObject::connect(m_accountRuntimeManager.get(), &AccountRuntimeManager::networkReachable,
+                         m_deferredSendService.get(), &DeferredSendService::networkBecameReachable);
         m_undoManager->setExecutor(QStringLiteral("deferred_send"), m_deferredSendService.get());
         m_composeService = std::make_unique<ComposeService>(
             *m_jmapComposeService, *m_errorCoordinator, *m_workScheduler, *m_accountRuntimeManager,

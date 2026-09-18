@@ -483,13 +483,23 @@ namespace javelin::app
         Q_EMIT foregroundAvailabilityChanged();
     }
 
+    void WorkScheduler::setNetworkReachable(const bool reachable)
+    {
+        if (m_networkReachable == reachable)
+            return;
+        m_networkReachable = reachable;
+        Q_EMIT foregroundAvailabilityChanged();
+    }
+
     bool WorkScheduler::mayStartBackgroundNetwork() const
     {
-        return m_foregroundDepth == 0 && !m_quietTimer.isActive();
+        return m_networkReachable && m_foregroundDepth == 0 && !m_quietTimer.isActive();
     }
 
     bool WorkScheduler::mayStartNetwork(const WorkPriority priority) const
     {
+        if (!m_networkReachable)
+            return false;
         if (priority == WorkPriority::VisibleMaterialization)
             return m_foregroundDepth == 0;
         return static_cast<int>(priority) >= static_cast<int>(WorkPriority::Foreground) ||

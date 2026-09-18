@@ -3,6 +3,7 @@
 #include "protocol/ActivationContract.h"
 
 #include <QObject>
+#include <QTimer>
 #include <memory>
 #include <optional>
 #include <string>
@@ -38,6 +39,9 @@ namespace javelin::app
         void activationRequested(javelin::protocol::ActivationRoute route);
         void shutdownRequested();
 
+      private Q_SLOTS:
+        void systemPreparingForSleep(bool preparingForSleep);
+
       private:
         void setupNetworkReachability();
         void refreshTrayUnreadCount();
@@ -48,6 +52,7 @@ namespace javelin::app
         DaemonServices& m_services;
         std::unique_ptr<DesktopNotificationController> m_notifications;
         std::unique_ptr<DaemonTrayController> m_tray;
+        QTimer m_resumeNetworkFallbackTimer;
         bool m_started = false;
     };
 } // namespace javelin::app

@@ -230,6 +230,86 @@ TEST_CASE("transport outages are coalesced across accounts sharing a mail servic
     CHECK(incidents == 2);
 }
 
+TEST_CASE("network recovery suppresses transient incidents but not authentication failures")
+{
+    using namespace std::chrono_literals;
+
+    QTemporaryDir settingsDirectory;
+    REQUIRE(settingsDirectory.isValid());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
+
+    StubAccountReader accountReader;
+    javelin::app::ApplicationErrorCoordinator coordinator{accountReader, nullptr, 1h};
+    const javelin::app::AccountConnectionSettings settings{
+        .connectionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+        .revision = 2,
+        .displayName = "Personal mail",
+        .sessionUrl = "https://mail.example.test/jmap",
+        .loginEmail = "user@example.test",
+        .apiKey = "secret",
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+    };
+
+    int incidents = 0;
+    bool lastPersistent = false;
+    bool lastOpensSettings = false;
+    QObject::connect(&coordinator, &javelin::app::ApplicationErrorCoordinator::incidentRaised,
+                     [&incidents, &lastPersistent, &lastOpensSettings](
+                         const QString&, const QString&, const QString&, const QString&,
+                         const bool persistent, const bool opensSettings)
+                     {
+                         ++incidents;
+                         lastPersistent = persistent;
+                         lastOpensSettings = opensSettings;
+                     });
+
+    const javelin::jmap::OperationError timeout{
+        .code = javelin::jmap::OperationErrorCode::Timeout,
+        .message = QStringLiteral("network is still settling"),
+    };
+    coordinator.networkBecameUnavailable();
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
+    CHECK(incidents == 0);
+
+    coordinator.networkBecameReachable();
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
+    CHECK(incidents == 0);
+    coordinator.reportSuccess(settings.connectionId);
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"), timeout);
+    CHECK(incidents == 0);
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"),
+                              {.code = javelin::jmap::OperationErrorCode::ServerUnavailable,
+                               .message = QStringLiteral("JMAP method temporarily unavailable"),
+                               .protocolType = "serverUnavailable"});
+    CHECK(incidents == 0);
+
+    coordinator.networkBecameUnavailable();
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"),
+                              {.code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                               .message = QStringLiteral("HTTP 401 Unauthorized"),
+                               .httpStatus = 401});
+    CHECK(incidents == 1);
+    CHECK(lastPersistent);
+    CHECK(lastOpensSettings);
+    CHECK(coordinator.authenticationPaused(settings.connectionId, settings.revision));
+    coordinator.forgetConnection(settings.connectionId);
+
+    javelin::app::ApplicationErrorCoordinator noGraceCoordinator{accountReader, nullptr, 0ms};
+    int postGraceIncidents = 0;
+    QObject::connect(
+        &noGraceCoordinator, &javelin::app::ApplicationErrorCoordinator::incidentRaised,
+        [&postGraceIncidents](const QString&, const QString&, const QString&, const QString&,
+                              const bool, const bool) { ++postGraceIncidents; });
+    noGraceCoordinator.networkBecameUnavailable();
+    noGraceCoordinator.networkBecameReachable();
+    noGraceCoordinator.reportFailure(settings, "account-a", QStringLiteral("Synchronize mail"),
+                                     timeout);
+    CHECK(postGraceIncidents == 1);
+}
+
 TEST_CASE("server method rejections are not hidden by outage coalescing")
 {
     StubAccountReader accountReader;

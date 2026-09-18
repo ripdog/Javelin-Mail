@@ -294,6 +294,27 @@ TEST_CASE("Undo before notification closure cancels without submitting",
     CHECK(fixture.submitter.attempts == 0);
 }
 
+TEST_CASE("deferred sends wait for network reachability before retrying",
+          "[app][deferred-send][service][network]")
+{
+    Fixture fixture;
+    fixture.seed(QStringLiteral("network-wait"), DeferredSendStatus::WaitingForNetwork,
+                 fixture.currentTime.addSecs(-1));
+
+    fixture.service.networkBecameUnavailable();
+    fixture.service.start();
+    dispatchNow(fixture.service);
+    CHECK(fixture.submitter.attempts == 0);
+    CHECK(requireSend(fixture.repository, QStringLiteral("network-wait")).status ==
+          DeferredSendStatus::WaitingForNetwork);
+
+    fixture.service.networkBecameReachable();
+    settleCoroutines();
+    CHECK(fixture.submitter.attempts == 1);
+    CHECK(requireSend(fixture.repository, QStringLiteral("network-wait")).status ==
+          DeferredSendStatus::Submitted);
+}
+
 TEST_CASE("waiting states keep their retry timer independent of Undo notifications",
           "[app][deferred-send][service][notification]")
 {

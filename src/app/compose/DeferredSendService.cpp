@@ -146,6 +146,22 @@ namespace javelin::app
             scheduleNext();
     }
 
+    void DeferredSendService::networkBecameUnavailable()
+    {
+        if (!m_networkReachable)
+            return;
+        m_networkReachable = false;
+        m_timer.stop();
+    }
+
+    void DeferredSendService::networkBecameReachable()
+    {
+        if (m_networkReachable)
+            return;
+        m_networkReachable = true;
+        dispatchDue();
+    }
+
     QCoro::Task<DeferredSendSubmitResult>
     DeferredSendService::schedule(std::string connectionId,
                                   javelin::jmap::submission::PreparedSend prepared,
@@ -355,6 +371,11 @@ namespace javelin::app
 
     void DeferredSendService::scheduleNext()
     {
+        if (!m_networkReachable)
+        {
+            m_timer.stop();
+            return;
+        }
         if (m_dispatchRunning)
             return;
         const auto listed = m_repository.listRecoverable();
@@ -383,6 +404,11 @@ namespace javelin::app
 
     void DeferredSendService::dispatchDue()
     {
+        if (!m_networkReachable)
+        {
+            m_timer.stop();
+            return;
+        }
         if (m_dispatchRunning)
             return;
         const auto listed = m_repository.listRecoverable();

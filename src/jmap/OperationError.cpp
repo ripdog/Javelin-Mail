@@ -92,17 +92,19 @@ namespace javelin::jmap
             code = OperationErrorCode::Cancelled;
         else if (error.networkError == QNetworkReply::TimeoutError)
             code = OperationErrorCode::Timeout;
-        else if (error.httpStatus == 401)
+        else if (error.code == api::TransportErrorCode::HttpFailure && error.httpStatus == 401)
             code = OperationErrorCode::AuthenticationRequired;
-        else if (error.httpStatus == 403)
+        else if (error.code == api::TransportErrorCode::HttpFailure && error.httpStatus == 403)
             code = OperationErrorCode::PermissionDenied;
-        else if (error.httpStatus == 408)
+        else if (error.code == api::TransportErrorCode::HttpFailure && error.httpStatus == 408)
             code = OperationErrorCode::Timeout;
-        else if (error.httpStatus == 429)
+        else if (error.code == api::TransportErrorCode::HttpFailure && error.httpStatus == 429)
             code = OperationErrorCode::RateLimited;
-        else if (error.httpStatus == 502 || error.httpStatus == 503 || error.httpStatus == 504)
+        else if (error.code == api::TransportErrorCode::HttpFailure &&
+                 (error.httpStatus == 502 || error.httpStatus == 503 || error.httpStatus == 504))
             code = OperationErrorCode::ServerUnavailable;
-        else if (error.httpStatus.has_value() && *error.httpStatus >= 500 &&
+        else if (error.code == api::TransportErrorCode::HttpFailure &&
+                 error.httpStatus.has_value() && *error.httpStatus >= 500 &&
                  *error.httpStatus <= 599)
             code = OperationErrorCode::ServerFailure;
         else if (error.code == api::TransportErrorCode::HttpFailure)
@@ -126,7 +128,9 @@ namespace javelin::jmap
     OperationError operationError(const api::AuthError& error)
     {
         return {
-            .code = OperationErrorCode::AuthenticationRequired,
+            .code = error.code == api::AuthErrorCode::SecretStoreFailure
+                        ? OperationErrorCode::LocalStorageFailure
+                        : OperationErrorCode::AuthenticationRequired,
             .message = QString::fromStdString(error.message),
         };
     }

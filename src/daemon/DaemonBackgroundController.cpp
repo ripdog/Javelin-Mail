@@ -25,15 +25,23 @@
 #include <KLocalizedString>
 #include <QCoroTask>
 
+#include <QDBusConnection>
 #include <QDateTime>
 #include <QDebug>
 #include <QNetworkInformation>
 
+#include <chrono>
+#include <ranges>
 #include <utility>
 #include <vector>
 
 namespace javelin::app
 {
+    namespace
+    {
+        constexpr auto resumeNetworkFallbackDelay = std::chrono::seconds{10};
+    }
+
     DaemonBackgroundController::DaemonBackgroundController(DaemonServices& services,
                                                            QObject* parent)
         : DaemonBackgroundController(services, std::make_unique<DesktopNotificationController>(),
@@ -47,6 +55,21 @@ namespace javelin::app
         : QObject(parent), m_services(services), m_notifications(std::move(notifications)),
           m_tray(std::make_unique<DaemonTrayController>(services.workScheduler(), this))
     {
+        m_resumeNetworkFallbackTimer.setSingleShot(true);
+        m_resumeNetworkFallbackTimer.setInterval(resumeNetworkFallbackDelay);
+        connect(&m_resumeNetworkFallbackTimer, &QTimer::timeout, this,
+                [this]
+                {
+                    auto* networkInformation = QNetworkInformation::instance();
+                    if (networkInformation != nullptr &&
+                        networkInformation->reachability() ==
+                            QNetworkInformation::Reachability::Online)
+                    {
+                        qInfo() << QStringLiteral(
+                            "Resume fallback confirms global reachability; reconnecting accounts");
+                        m_services.accountRuntimeManager().networkBecameReachable();
+                    }
+                });
         m_notifications->setParent(this);
         connect(m_notifications.get(), &DesktopNotificationController::notificationActivated, this,
                 [this](const QString& accountId, const QString& mailboxId,
@@ -363,6 +386,9 @@ namespace javelin::app
         connect(m_tray.get(), &DaemonTrayController::stopBackgroundServiceRequested, this,
                 &DaemonBackgroundController::shutdownRequested);
 
+        if (enableNetworkReachability)
+            setupNetworkReachability();
+
         if (const auto error = notificationService.recoverDispatches())
             qWarning().noquote() << QStringLiteral("Recover mail notification delivery:")
                                  << error->message;
@@ -379,8 +405,6 @@ namespace javelin::app
             m_services.calendarInvitationService().accountChanged(owner);
             m_services.calendarNotificationService().calendarMetadataReady(owner);
         }
-        if (enableNetworkReachability)
-            setupNetworkReachability();
         refreshTrayUnreadCount();
         if (!m_tray->start())
             qInfo() << QStringLiteral("Tray integration is unavailable; daemon services continue");
@@ -392,32 +416,88 @@ namespace javelin::app
         if (!m_started && !m_tray->isAvailable())
             return;
         m_services.mailNotificationService().setDeliveryPort(nullptr);
+        m_resumeNetworkFallbackTimer.stop();
+        if (auto* networkInformation = QNetworkInformation::instance();
+            networkInformation != nullptr)
+            disconnect(networkInformation, nullptr, this, nullptr);
+        static_cast<void>(QDBusConnection::systemBus().disconnect(
+            QStringLiteral("org.freedesktop.login1"), QStringLiteral("/org/freedesktop/login1"),
+            QStringLiteral("org.freedesktop.login1.Manager"), QStringLiteral("PrepareForSleep"),
+            this, SLOT(systemPreparingForSleep(bool))));
         m_tray->stop();
         m_started = false;
     }
 
     void DaemonBackgroundController::setupNetworkReachability()
     {
-        if (!QNetworkInformation::loadDefaultBackend())
+        if (QNetworkInformation::instance() == nullptr)
         {
-            qWarning() << QStringLiteral(
-                "Network reachability backend unavailable; resume watchdog remains active");
-            return;
+            const auto backends = QNetworkInformation::availableBackends();
+            const auto networkManager = std::ranges::find_if(
+                backends,
+                [](const QString& backend)
+                {
+                    return backend.contains(QStringLiteral("networkmanager"), Qt::CaseInsensitive);
+                });
+            bool loaded = networkManager != backends.end() &&
+                          QNetworkInformation::loadBackendByName(*networkManager);
+            if (!loaded)
+                loaded = QNetworkInformation::loadDefaultBackend();
+            if (!loaded)
+            {
+                qWarning() << QStringLiteral(
+                    "Network reachability backend unavailable; resume watchdog remains active");
+                return;
+            }
         }
 
         auto* networkInformation = QNetworkInformation::instance();
         if (networkInformation == nullptr)
             return;
 
+        if (!QDBusConnection::systemBus().connect(
+                QStringLiteral("org.freedesktop.login1"), QStringLiteral("/org/freedesktop/login1"),
+                QStringLiteral("org.freedesktop.login1.Manager"), QStringLiteral("PrepareForSleep"),
+                this, SLOT(systemPreparingForSleep(bool))))
+        {
+            qWarning() << QStringLiteral("System suspend monitoring unavailable; NetworkManager "
+                                         "reachability remains active");
+        }
+
+        qInfo().noquote() << QStringLiteral("Network reachability backend: %1")
+                                 .arg(networkInformation->backendName());
+        const auto applyReachability = [this](const QNetworkInformation::Reachability reachability)
+        {
+            if (reachability == QNetworkInformation::Reachability::Online)
+            {
+                qInfo() << QStringLiteral(
+                    "Network became reachable; reconnecting account synchronization");
+                m_services.accountRuntimeManager().networkBecameReachable();
+                return;
+            }
+
+            qInfo() << QStringLiteral(
+                "Network is not globally reachable; pausing account synchronization");
+            m_services.accountRuntimeManager().networkBecameUnavailable();
+        };
         connect(networkInformation, &QNetworkInformation::reachabilityChanged, this,
-                [this](const QNetworkInformation::Reachability reachability)
-                {
-                    if (reachability != QNetworkInformation::Reachability::Online)
-                        return;
-                    qInfo() << QStringLiteral(
-                        "Network became reachable; reconnecting account synchronization");
-                    m_services.accountRuntimeManager().networkBecameReachable();
-                });
+                applyReachability);
+        applyReachability(networkInformation->reachability());
+    }
+
+    void DaemonBackgroundController::systemPreparingForSleep(const bool preparingForSleep)
+    {
+        if (preparingForSleep)
+        {
+            m_resumeNetworkFallbackTimer.stop();
+            qInfo() << QStringLiteral("System is suspending; pausing account synchronization");
+            m_services.accountRuntimeManager().networkBecameUnavailable();
+            return;
+        }
+
+        qInfo() << QStringLiteral(
+            "System resumed; waiting for NetworkManager to report global reachability");
+        m_resumeNetworkFallbackTimer.start();
     }
 
     void DaemonBackgroundController::refreshTrayUnreadCount()

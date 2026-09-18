@@ -45,8 +45,10 @@ namespace javelin::app
     } // namespace
 
     ApplicationErrorCoordinator::ApplicationErrorCoordinator(
-        javelin::jmap::cache::AccountReader& accountReader, QObject* parent)
-        : QObject(parent), m_accountReader(accountReader)
+        javelin::jmap::cache::AccountReader& accountReader, QObject* parent,
+        const std::chrono::milliseconds networkRecoveryGrace)
+        : QObject(parent), m_accountReader(accountReader),
+          m_networkRecoveryGrace(networkRecoveryGrace)
     {
     }
 
@@ -58,11 +60,21 @@ namespace javelin::app
         if (javelin::jmap::isCancellation(error))
             return;
 
-        logFailure(settings, accountId, operation, error);
         if (settings.connectionId.empty())
+        {
+            logFailure(settings, accountId, operation, error);
             return;
+        }
 
         const bool authentication = javelin::jmap::isAuthenticationError(error);
+        const bool serviceOutage = isServiceOutage(error);
+        const bool recoveryTransient =
+            javelin::jmap::isTransientError(error) &&
+            error.code != javelin::jmap::OperationErrorCode::LocalStorageBusy;
+        if (recoveryTransient && networkRecoverySuppressesServiceOutage(settings))
+            return;
+
+        logFailure(settings, accountId, operation, error);
         if (authentication)
         {
             const auto key = incidentKey(settings.connectionId, error.code);
@@ -71,7 +83,7 @@ namespace javelin::app
             persistAuthenticationPause(settings.connectionId, settings.revision);
             Q_EMIT authenticationPauseChanged(connectionKey(settings.connectionId), true);
         }
-        else if (isServiceOutage(error))
+        else if (serviceOutage)
         {
             const auto key = serviceIncidentKey(settings);
             m_connectionServices.insert_or_assign(settings.connectionId, key.toStdString());
@@ -116,6 +128,7 @@ namespace javelin::app
         if (service == m_connectionServices.end())
             return;
         const auto serviceKey = service->second;
+        m_serviceRecoveryFailures.erase(serviceKey);
         m_connectionServices.erase(service);
         if (std::ranges::none_of(m_connectionServices, [&serviceKey](const auto& entry)
                                  { return entry.second == serviceKey; }))
@@ -146,10 +159,27 @@ namespace javelin::app
         if (service == m_connectionServices.end())
             return;
         const auto serviceKey = service->second;
+        m_serviceRecoveryFailures.erase(serviceKey);
         m_connectionServices.erase(service);
         if (std::ranges::none_of(m_connectionServices, [&serviceKey](const auto& entry)
                                  { return entry.second == serviceKey; }))
             m_activeIncidents.erase(serviceKey);
+    }
+
+    void ApplicationErrorCoordinator::networkBecameUnavailable()
+    {
+        m_networkReachable = false;
+        m_networkRecoveryStarted.reset();
+        m_serviceRecoveryFailures.clear();
+    }
+
+    void ApplicationErrorCoordinator::networkBecameReachable()
+    {
+        if (m_networkReachable)
+            return;
+        m_networkReachable = true;
+        m_networkRecoveryStarted = std::chrono::steady_clock::now();
+        m_serviceRecoveryFailures.clear();
     }
 
     bool ApplicationErrorCoordinator::authenticationPaused(const std::string_view connectionId,
@@ -202,6 +232,28 @@ namespace javelin::app
         default:
             return false;
         }
+    }
+
+    bool ApplicationErrorCoordinator::networkRecoverySuppressesServiceOutage(
+        const AccountConnectionSettings& settings)
+    {
+        if (!m_networkReachable)
+            return true;
+        if (!m_networkRecoveryStarted.has_value())
+            return false;
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto serviceKey = serviceIncidentKey(settings).toStdString();
+        m_connectionServices.insert_or_assign(settings.connectionId, serviceKey);
+        const auto firstFailure = m_serviceRecoveryFailures.find(serviceKey);
+        if (firstFailure != m_serviceRecoveryFailures.end())
+            return now - firstFailure->second < m_networkRecoveryGrace;
+
+        if (now - *m_networkRecoveryStarted >= m_networkRecoveryGrace)
+            return false;
+
+        m_serviceRecoveryFailures.emplace(serviceKey, now);
+        return m_networkRecoveryGrace > std::chrono::milliseconds::zero();
     }
 
     QString ApplicationErrorCoordinator::userTitle(const javelin::jmap::OperationError& error)

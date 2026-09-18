@@ -629,6 +629,36 @@ TEST_CASE("continuous mail pushes cannot postpone the first debounce deadline",
     CHECK(fixture.transport.emailDeltaAttempts > attemptsBefore);
 }
 
+TEST_CASE("network loss quiesces account synchronization until reachability returns",
+          "[app][account][sync][network]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    fixture.coordinator.networkBecameUnavailable();
+    CHECK(fixture.coordinator.status() ==
+          javelin::app::AccountSyncCoordinator::Status::Disconnected);
+    const auto attemptsWhileOffline = fixture.transport.emailDeltaAttempts;
+    REQUIRE(fixture.coordinator.requestSynchronization());
+
+    QElapsedTimer offlineWindow;
+    offlineWindow.start();
+    while (offlineWindow.elapsed() < 900)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    CHECK(fixture.transport.emailDeltaAttempts == attemptsWhileOffline);
+
+    fixture.coordinator.networkBecameReachable();
+    REQUIRE(waitUntil([&fixture, attemptsWhileOffline]
+                      { return fixture.transport.emailDeltaAttempts > attemptsWhileOffline; }));
+}
+
 TEST_CASE("reconnect and transient retry keep the authoritative Email reconciliation demand",
           "[app][account][sync][ownership][retry]")
 {
