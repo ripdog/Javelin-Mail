@@ -60,7 +60,7 @@ namespace javelin::app
                     {QStringLiteral("registrationAccessToken"),
                      credentials.registrationAccessToken},
                 };
-                if (m_wallet->writeMap(connectionId, values) != 0 || m_wallet->sync() != 0)
+                if (m_wallet->writeMap(connectionId, values) != 0)
                 {
                     return AccountCredentialStoreError{
                         .detail = QStringLiteral("KWallet could not store account credentials.")};
@@ -77,7 +77,7 @@ namespace javelin::app
                     return error;
                 if (!m_wallet->hasEntry(connectionId))
                     return std::nullopt;
-                if (m_wallet->removeEntry(connectionId) != 0 || m_wallet->sync() != 0)
+                if (m_wallet->removeEntry(connectionId) != 0)
                 {
                     return AccountCredentialStoreError{
                         .detail = QStringLiteral("KWallet could not remove account credentials.")};
