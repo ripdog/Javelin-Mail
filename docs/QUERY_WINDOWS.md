@@ -87,10 +87,13 @@ Collapsing the row before completion cancels only that presentation intent, not 
 work.
 
 A GUI already presenting a complete window may retain its rows as a continuity snapshot while that
-window is stale and an authoritative replacement is pending. Such a snapshot is not evidence of
-current position, total, or ordered membership and cannot by itself prove the next server range. It
-exists only to preserve stable selection, detail content, and viewport rather than blanking or
-replacing the user's view. Reconciliation installs the replacement by stable object identity.
+window is stale and an authoritative replacement is pending. A newly activated mailbox may likewise
+present a persisted stale window immediately when it is the best cached view available, while
+materialization starts in parallel. Such a snapshot is not evidence of current position, total, or
+ordered membership and cannot by itself prove the next server range. It exists only to preserve
+stable selection, detail content, and viewport rather than blanking or replacing the user's view.
+Pagination remains disabled until a display-current window replaces it. Reconciliation installs the
+replacement by stable object identity.
 
 Quick-filter presentation applies the same principle more narrowly after reconciliation. If the
 currently selected Email stops being the live filter's displayed representative, the session may

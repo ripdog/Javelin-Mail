@@ -517,6 +517,51 @@ TEST_CASE("optimistic mailbox metadata invalidation marks an active mailbox sess
     CHECK(failureCount == 1);
 }
 
+TEST_CASE("stale mailbox cache is presented while reconciliation remains in flight",
+          "[app][mailbox-session][cache-first]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-stale-cache-first-test"));
+    seedInfiniteScrollData(context.connection, false);
+    javelin::jmap::cache::MailboxWindowRepository windows{context.connection};
+    REQUIRE_FALSE(windows.invalidateMailbox("account-1", "mailbox-1").has_value());
+
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         2,
+        events};
+
+    session.loadCachedState();
+    waitFor(
+        [&]
+        {
+            return session.state().items.size() == 2 &&
+                   materialization.lastMailboxIntent.has_value();
+        });
+
+    REQUIRE(session.state().items.size() == 2);
+    CHECK(session.state().items[0].emailId == "email-1");
+    CHECK(session.state().items[1].emailId == "email-2");
+    CHECK(session.state().cacheLoaded);
+    CHECK(session.state().stale);
+    CHECK(session.state().refreshInFlight);
+    CHECK_FALSE(session.canLoadMore());
+
+    REQUIRE(materialization.lastMailboxIntent.has_value());
+    CHECK(materialization.lastMailboxIntent->offset == 0);
+    CHECK(materialization.lastMailboxIntent->limit == 2);
+    CHECK_FALSE(materialization.lastMailboxIntent->anchor.has_value());
+    CHECK_FALSE(materialization.lastMailboxIntent->forceRefresh);
+
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("Expected stale-cache reconciliation completion."),
+    });
+    waitFor([&] { return !session.state().refreshInFlight; });
+    CHECK(session.state().items.size() == 2);
+}
+
 TEST_CASE("missing initial mailbox cache materializes itself after the cache read",
           "[app][mailbox-session][infinite-scroll]")
 {

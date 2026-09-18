@@ -1,5 +1,7 @@
 #include "gui/shell/MailWorkspaceController.h"
 
+#include "app/MailboxSession.h"
+
 #include <utility>
 
 namespace javelin::gui::shell
@@ -101,6 +103,20 @@ namespace javelin::gui::shell
     int MailWorkspaceController::activateHomeMailbox(std::string accountId, std::string mailboxId,
                                                      QString title, std::optional<std::string> role)
     {
+        if (!m_tabs.empty())
+        {
+            auto* homeMailbox = std::get_if<MailboxTabState>(&m_tabs[0].content);
+            if (homeMailbox != nullptr && homeMailbox->session != nullptr &&
+                homeMailbox->session->accountId() == accountId &&
+                homeMailbox->session->mailboxId() == mailboxId &&
+                !homeMailbox->session->quickFilterActive())
+            {
+                homeMailbox->session->updateMetadata(std::move(title), std::move(role));
+                m_activeIndex = 0;
+                return 0;
+            }
+        }
+
         auto tab = m_messageListTabs.createMailboxTab({.accountId = std::move(accountId),
                                                        .mailboxId = std::move(mailboxId),
                                                        .title = std::move(title),

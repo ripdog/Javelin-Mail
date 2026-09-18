@@ -325,6 +325,7 @@ add_executable(javelin_gui_policy_tests
     gui/SignatureTrackingPolicyTest.cpp
     gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
+    gui/MailWorkspaceControllerTest.cpp
     gui/MessageActionPolicyTest.cpp
     gui/EmailContextMenuLayoutTest.cpp
     gui/MailSaveNamingTest.cpp

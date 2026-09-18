@@ -543,12 +543,41 @@ namespace javelin::app
                     }
                     else
                     {
-                        m_state.stale = true;
-                        if (m_state.items.empty())
+                        std::size_t stalePrefixLength = 0;
+                        if (!quickFilterActive())
                         {
-                            m_state.cacheLoaded = false;
+                            while (stalePrefixLength < windows.size() &&
+                                   windows[stalePrefixLength].has_value() &&
+                                   windows[stalePrefixLength]->coverage ==
+                                       javelin::jmap::cache::QueryWindowCoverage::Stale)
+                            {
+                                ++stalePrefixLength;
+                            }
+                        }
+
+                        if (stalePrefixLength > 0)
+                        {
+                            std::vector<javelin::jmap::cache::MailboxWindowPage> cached;
+                            cached.reserve(stalePrefixLength);
+                            for (std::size_t index = 0; index < stalePrefixLength; ++index)
+                                cached.push_back(std::move(*windows[index]));
+                            m_windows.resize(stalePrefixLength);
+                            rebuildFromProjectedWindows(std::move(cached),
+                                                        std::move(snapshot.continuityItem));
+                            m_state.stale = true;
+                            m_state.refreshError.clear();
                             if (!m_refreshAwaitingCache && !m_state.refreshInFlight)
                                 materializeMissingInitial = true;
+                        }
+                        else
+                        {
+                            m_state.stale = true;
+                            if (m_state.items.empty())
+                            {
+                                m_state.cacheLoaded = false;
+                                if (!m_refreshAwaitingCache && !m_state.refreshInFlight)
+                                    materializeMissingInitial = true;
+                            }
                         }
                     }
                 }
@@ -557,7 +586,7 @@ namespace javelin::app
                 {
                     m_refreshAwaitingCache = false;
                     m_state.refreshInFlight = false;
-                    if (!m_state.cacheLoaded)
+                    if (!m_state.cacheLoaded || m_state.stale)
                         m_state.refreshError = i18n("Could not load the refreshed message list.");
                 }
 
@@ -600,7 +629,7 @@ namespace javelin::app
             metadata.total = page.total;
             metadata.queryState = page.queryState;
             metadata.itemCount = page.items.size();
-            metadata.displayCurrent = true;
+            metadata.displayCurrent = displayCurrent(page);
 
             for (auto& item : page.items)
             {
@@ -649,7 +678,7 @@ namespace javelin::app
         m_state.items = std::move(items);
         static_cast<void>(updateThreadMaterializationState());
         m_state.itemsRevision = ++m_itemsRevision;
-        m_state.cacheLoaded = !m_windows.empty() && m_windows.front().displayCurrent;
+        m_state.cacheLoaded = !m_windows.empty();
         if (!m_windows.empty())
         {
             const auto& last = m_windows.back();
@@ -901,12 +930,14 @@ namespace javelin::app
 
     bool MailboxSession::canLoadMore() const
     {
-        if (m_state.refreshInFlight || m_state.loadMoreInFlight || m_windows.empty() ||
-            m_state.items.empty() || m_endReached)
+        if (m_state.refreshInFlight || m_state.loadMoreInFlight || m_state.stale ||
+            m_windows.empty() || m_state.items.empty() || m_endReached)
         {
             return false;
         }
         const auto& last = m_windows.back();
+        if (!last.displayCurrent)
+            return false;
         if (last.itemCount == 0)
             return false;
         return !last.total.has_value() || nextOffset() < *last.total;
