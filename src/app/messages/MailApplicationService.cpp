@@ -1510,7 +1510,8 @@ namespace javelin::app
             coordinatorIt->second = std::make_unique<AccountSyncCoordinator>(
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
                 m_transportCooldowns, m_accountRepository, m_mailboxReader, m_workScheduler,
-                *m_mailQueryRefreshPort, m_endpointRetryGate, m_authenticationRefreshHandler, this);
+                *m_mailQueryRefreshPort, m_endpointRetryGate, m_authenticationRefreshHandler,
+                StateChangeRecoveryPolicy{}, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
             if (!m_networkReachable)
                 coordinatorIt->second->networkBecameUnavailable();

@@ -3,6 +3,7 @@
 #include "app/WorkScheduler.h"
 #include "jmap/sync/StateChangeSource.h"
 
+#include <cstddef>
 #include <ranges>
 #include <span>
 #include <string>
@@ -18,6 +19,59 @@ namespace javelin::app
         bool calendar = false;
         bool contacts = false;
         bool identities = false;
+    };
+
+    struct StateChangeRecoveryPolicy
+    {
+        std::size_t failedConnectionAttemptsBeforeIncident = 3;
+    };
+
+    class StateChangeRecoveryTracker final
+    {
+      public:
+        explicit StateChangeRecoveryTracker(StateChangeRecoveryPolicy policy = {})
+            : m_policy(policy)
+        {
+        }
+
+        void reset()
+        {
+            m_connectionEstablished = false;
+            m_incidentReported = false;
+            m_failedConnectionAttempts = 0;
+        }
+
+        void connected()
+        {
+            m_connectionEstablished = true;
+            m_incidentReported = false;
+            m_failedConnectionAttempts = 0;
+        }
+
+        [[nodiscard]] bool recordTransientFailure()
+        {
+            if (m_connectionEstablished)
+            {
+                m_connectionEstablished = false;
+                m_failedConnectionAttempts = 0;
+                return false;
+            }
+            if (m_incidentReported)
+                return false;
+
+            ++m_failedConnectionAttempts;
+            if (m_failedConnectionAttempts < m_policy.failedConnectionAttemptsBeforeIncident)
+                return false;
+
+            m_incidentReported = true;
+            return true;
+        }
+
+      private:
+        StateChangeRecoveryPolicy m_policy;
+        bool m_connectionEstablished = false;
+        bool m_incidentReported = false;
+        std::size_t m_failedConnectionAttempts = 0;
     };
 
     struct RoutedStateChanges

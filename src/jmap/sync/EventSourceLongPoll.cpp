@@ -281,17 +281,6 @@ namespace javelin::jmap::sync
                              if (m_activeReply == activeReply)
                                  m_activeReply.clear();
                          });
-        bool connectedReported = false;
-        QObject::connect(reply.data(), &QNetworkReply::requestSent, reply.data(),
-                         [&activity, &connectedReported]()
-                         {
-                             if (!connectedReported)
-                             {
-                                 connectedReported = true;
-                                 activity.recordActivity();
-                             }
-                         });
-
         QByteArray pendingBuffer;
         std::string eventName;
         std::string eventId;
@@ -306,6 +295,32 @@ namespace javelin::jmap::sync
 
         PushStreamSession stream{std::move(subscription), consumer};
         bool responseHeadersValidated = false;
+        QObject::connect(reply.data(), &QNetworkReply::metaDataChanged, reply.data(),
+                         [reply, &activity, &responseHeadersValidated]()
+                         {
+                             if (responseHeadersValidated || reply == nullptr)
+                                 return;
+
+                             const auto statusAttribute =
+                                 reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+                             if (!statusAttribute.isValid())
+                                 return;
+
+                             const int statusCode = statusAttribute.toInt();
+                             if (statusCode < 200 || statusCode >= 300)
+                                 return;
+
+                             const auto contentType =
+                                 reply->header(QNetworkRequest::ContentTypeHeader).toString();
+                             if (!contentType.startsWith(QStringLiteral("text/event-stream"),
+                                                         Qt::CaseInsensitive))
+                             {
+                                 return;
+                             }
+
+                             responseHeadersValidated = true;
+                             activity.recordActivity();
+                         });
 
         const auto finalizeEvent =
             [&]() -> QCoro::Task<std::optional<javelin::jmap::api::TransportError>>
@@ -393,11 +408,7 @@ namespace javelin::jmap::sync
                         statusCode);
                 }
                 responseHeadersValidated = true;
-                if (!connectedReported)
-                {
-                    connectedReported = true;
-                    activity.recordActivity();
-                }
+                activity.recordActivity();
             }
 
             if (!activeReply->isFinished() && activeReply->bytesAvailable() == 0)
@@ -423,29 +434,23 @@ namespace javelin::jmap::sync
                 if (!ready && activeReply->isFinished())
                 {
                     const QByteArray chunk = activeReply->readAll();
-                    if (!chunk.isEmpty())
-                    {
+                    if (!chunk.isEmpty() && responseHeadersValidated)
                         activity.recordActivity();
-                    }
                     pendingBuffer += chunk;
                 }
                 else if (ready)
                 {
                     const QByteArray chunk = activeReply->readAll();
-                    if (!chunk.isEmpty())
-                    {
+                    if (!chunk.isEmpty() && responseHeadersValidated)
                         activity.recordActivity();
-                    }
                     pendingBuffer += chunk;
                 }
             }
             else
             {
                 const QByteArray chunk = activeReply->readAll();
-                if (!chunk.isEmpty())
-                {
+                if (!chunk.isEmpty() && responseHeadersValidated)
                     activity.recordActivity();
-                }
                 pendingBuffer += chunk;
             }
 

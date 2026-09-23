@@ -8,9 +8,12 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QHostAddress>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QPointer>
+#include <QTcpServer>
+#include <QTcpSocket>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -92,6 +95,26 @@ namespace
             return pending;
         }
     };
+
+    void serveHttpResponseOnce(QTcpServer& server, QByteArray response)
+    {
+        QObject::connect(&server, &QTcpServer::newConnection, &server,
+                         [&server, response = std::move(response)]
+                         {
+                             auto* socket = server.nextPendingConnection();
+                             if (socket == nullptr)
+                                 return;
+
+                             QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                                              [socket, response]
+                                              {
+                                                  static_cast<void>(socket->readAll());
+                                                  socket->write(response);
+                                                  socket->flush();
+                                                  socket->disconnectFromHost();
+                                              });
+                         });
+    }
 
     class RecordingConsumer final : public javelin::jmap::sync::StateChangeConsumer
     {
@@ -235,6 +258,82 @@ TEST_CASE("push stream sessions own state delivery for every transport", "[jmap]
     CHECK(stream.summary().updateCount == 2);
     REQUIRE(consumer.alerts.size() == 1);
     CHECK(consumer.alerts.front().calendarEventId == "event-1");
+}
+
+TEST_CASE("event source does not report connected before validating response headers",
+          "[jmap][push][event-source][status]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost, 0));
+    serveHttpResponseOnce(server,
+                          QByteArray{"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
+                                     "Connection: close\r\n\r\n"});
+    QNetworkAccessManager networkAccessManager;
+    std::size_t connectedReports = 0;
+    const auto endpoint =
+        QStringLiteral("http://127.0.0.1:%1/events").arg(server.serverPort()).toStdString();
+    javelin::jmap::sync::EventSourceStateChangeSource source{
+        networkAccessManager, endpoint, "token",
+        [&connectedReports](const javelin::jmap::sync::StateChangeConnectionStatus status)
+        {
+            if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
+                ++connectedReports;
+        }};
+    RecordingConsumer consumer;
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+
+    const auto result = QCoro::waitFor(source.consume(
+        {
+            .accountId = "account-1",
+            .lastState = {},
+            .types = {"Email"},
+            .groupwareAccountIds = {},
+        },
+        consumer, cancellation));
+
+    CHECK(std::holds_alternative<javelin::jmap::api::TransportError>(result));
+    CHECK(connectedReports == 0);
+}
+
+TEST_CASE("event source reports connected after validating a stream response",
+          "[jmap][push][event-source][status]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost, 0));
+    serveHttpResponseOnce(server,
+                          QByteArray{"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                                     "Connection: close\r\n\r\n"});
+    QNetworkAccessManager networkAccessManager;
+    std::size_t connectedReports = 0;
+    const auto endpoint =
+        QStringLiteral("http://127.0.0.1:%1/events").arg(server.serverPort()).toStdString();
+    javelin::jmap::sync::EventSourceStateChangeSource source{
+        networkAccessManager, endpoint, "token",
+        [&connectedReports](const javelin::jmap::sync::StateChangeConnectionStatus status)
+        {
+            if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
+                ++connectedReports;
+        }};
+    RecordingConsumer consumer;
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+
+    const auto result = QCoro::waitFor(source.consume(
+        {
+            .accountId = "account-1",
+            .lastState = {},
+            .types = {"Email"},
+            .groupwareAccountIds = {},
+        },
+        consumer, cancellation));
+
+    const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result);
+    REQUIRE(error != nullptr);
+    CHECK(error->code == javelin::jmap::api::TransportErrorCode::NetworkFailure);
+    CHECK(connectedReports == 1);
 }
 
 TEST_CASE("push activity tracking shares status and timeout state", "[jmap][push]")

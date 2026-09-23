@@ -18,6 +18,42 @@ TEST_CASE("state-change subscriptions include supported groupware data types", "
                                    "CalendarAlert", "AddressBook", "ContactCard"});
 }
 
+TEST_CASE("state-change recovery escalates only after the configured failure threshold",
+          "[app][sync][recovery]")
+{
+    javelin::app::StateChangeRecoveryTracker recovery{
+        {.failedConnectionAttemptsBeforeIncident = 3}};
+
+    CHECK_FALSE(recovery.recordTransientFailure());
+    CHECK_FALSE(recovery.recordTransientFailure());
+    CHECK(recovery.recordTransientFailure());
+    CHECK_FALSE(recovery.recordTransientFailure());
+
+    recovery.connected();
+    CHECK_FALSE(recovery.recordTransientFailure());
+    CHECK_FALSE(recovery.recordTransientFailure());
+    CHECK_FALSE(recovery.recordTransientFailure());
+    CHECK(recovery.recordTransientFailure());
+    CHECK_FALSE(recovery.recordTransientFailure());
+}
+
+TEST_CASE("state-change recovery threshold is policy driven", "[app][sync][recovery]")
+{
+    javelin::app::StateChangeRecoveryTracker recovery{
+        {.failedConnectionAttemptsBeforeIncident = 1}};
+
+    CHECK(recovery.recordTransientFailure());
+    CHECK_FALSE(recovery.recordTransientFailure());
+
+    recovery.connected();
+    CHECK_FALSE(recovery.recordTransientFailure());
+    CHECK(recovery.recordTransientFailure());
+    CHECK_FALSE(recovery.recordTransientFailure());
+
+    recovery.reset();
+    CHECK(recovery.recordTransientFailure());
+}
+
 TEST_CASE("secondary Identity changes survive subscription filtering", "[app][sync][identity]")
 {
     const javelin::jmap::sync::StateChangeSubscription subscription{

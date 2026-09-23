@@ -3,6 +3,7 @@
 #include "app/AccountConnectionSettings.h"
 #include "app/MailApplicationTypes.h"
 #include "app/MailQueryRefreshPort.h"
+#include "app/StateChangePolicy.h"
 #include "app/account/EndpointRetryGate.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
@@ -61,7 +62,7 @@ namespace javelin::app
             javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
             MailQueryRefreshPort& mailQueryRefreshPort, EndpointRetryGate& endpointRetryGate,
             javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler = {},
-            QObject* parent = nullptr);
+            StateChangeRecoveryPolicy stateChangeRecoveryPolicy = {}, QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
@@ -194,8 +195,9 @@ namespace javelin::app
         void restartForCatchUp();
         void restart();
         void setStatus(Status status);
-        void handleStateChangeAuthenticationError(const QString& operation,
-                                                  const javelin::jmap::OperationError& error);
+        void handleStateChangeStatus(javelin::jmap::sync::StateChangeConnectionStatus status);
+        void handleStateChangeError(const QString& operation,
+                                    const javelin::jmap::OperationError& error);
         [[nodiscard]] QCoro::Task<void>
         recoverStateChangeAuthentication(QString operation, javelin::jmap::OperationError error,
                                          std::size_t generation, std::string accountId,
@@ -217,6 +219,7 @@ namespace javelin::app
         MailQueryRefreshPort& m_mailQueryRefreshPort;
         EndpointRetryGate& m_endpointRetryGate;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
+        StateChangeRecoveryTracker m_stateChangeRecovery;
         std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;
         std::vector<std::string> m_mailboxIds;

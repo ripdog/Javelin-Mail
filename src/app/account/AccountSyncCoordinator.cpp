@@ -86,13 +86,14 @@ namespace javelin::app
         javelin::jmap::cache::MailboxReader& mailboxReader, WorkScheduler& workScheduler,
         MailQueryRefreshPort& mailQueryRefreshPort, EndpointRetryGate& endpointRetryGate,
         javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler,
-        QObject* parent)
+        StateChangeRecoveryPolicy stateChangeRecoveryPolicy, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
           m_mailboxReader(mailboxReader), m_workScheduler(workScheduler),
           m_mailQueryRefreshPort(mailQueryRefreshPort), m_endpointRetryGate(endpointRetryGate),
-          m_authenticationRefreshHandler(std::move(authenticationRefreshHandler))
+          m_authenticationRefreshHandler(std::move(authenticationRefreshHandler)),
+          m_stateChangeRecovery(stateChangeRecoveryPolicy)
     {
         m_refreshClock.start();
         m_refreshDebounceTimer.setSingleShot(true);
@@ -255,6 +256,7 @@ namespace javelin::app
         m_pendingContactStateChanges.clear();
         m_pendingIdentityStateChanges.clear();
         m_authenticationRecoveryInFlight = false;
+        m_stateChangeRecovery.reset();
         m_refreshDebounceTimer.stop();
         m_groupwareRetryTimer.stop();
         m_notificationBaselineRetryTimer.stop();
@@ -1206,30 +1208,28 @@ namespace javelin::app
         auto runContext = std::make_shared<RunContext>();
         runContext->generation = ++m_generation;
         runContext->configuration = *nextConfiguration;
-        const auto sourceStatusCallback =
+        const auto stateChangeStatusCallback =
             [this, generation = runContext->generation](
                 const javelin::jmap::sync::StateChangeConnectionStatus status)
         {
             if (m_runContext == nullptr || m_runContext->generation != generation)
-            {
                 return;
-            }
 
-            setStatus(toServiceStatus(status));
+            handleStateChangeStatus(status);
         };
         if (nextConfiguration->websocket.has_value() && nextConfiguration->websocket->supportsPush)
         {
             auto webSocketSource =
                 std::make_unique<javelin::jmap::sync::WebSocketStateChangeSource>(
                     nextConfiguration->websocket->url, nextConfiguration->settings.apiKey,
-                    sourceStatusCallback);
+                    stateChangeStatusCallback);
             std::unique_ptr<javelin::jmap::sync::StateChangeSource> httpFallbackSource;
             if (!nextConfiguration->eventSourceUrl.empty())
             {
                 httpFallbackSource =
                     std::make_unique<javelin::jmap::sync::EventSourceStateChangeSource>(
                         m_networkAccessManager, nextConfiguration->eventSourceUrl,
-                        nextConfiguration->settings.apiKey, sourceStatusCallback);
+                        nextConfiguration->settings.apiKey, stateChangeStatusCallback);
             }
             runContext->source = std::make_unique<javelin::jmap::sync::PreferredStateChangeSource>(
                 m_transportCooldowns, nextConfiguration->websocket->url, std::move(webSocketSource),
@@ -1240,32 +1240,16 @@ namespace javelin::app
             runContext->source =
                 std::make_unique<javelin::jmap::sync::EventSourceStateChangeSource>(
                     m_networkAccessManager, nextConfiguration->eventSourceUrl,
-                    nextConfiguration->settings.apiKey, sourceStatusCallback);
+                    nextConfiguration->settings.apiKey, stateChangeStatusCallback);
         }
         runContext->worker = std::make_unique<javelin::jmap::sync::StateChangeWorker>(
             *runContext->source, *this, runContext->sleeper, javelin::jmap::sync::BackoffPolicy{},
-            [this, generation = runContext->generation](
-                const javelin::jmap::sync::StateChangeConnectionStatus status)
-            {
-                if (m_runContext == nullptr || m_runContext->generation != generation)
-                {
-                    return;
-                }
-
-                if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
-                {
-                    m_stateChangeAuthenticationRetryToken.reset();
-                    return;
-                }
-
-                setStatus(toServiceStatus(status));
-            },
+            stateChangeStatusCallback,
             [this, generation = runContext->generation](const javelin::jmap::OperationError& error)
             {
                 if (m_runContext == nullptr || m_runContext->generation != generation)
                     return;
-                handleStateChangeAuthenticationError(QStringLiteral("Maintain account connection"),
-                                                     error);
+                handleStateChangeError(QStringLiteral("Maintain account connection"), error);
             });
 
         m_runContext = runContext;
@@ -1310,9 +1294,30 @@ namespace javelin::app
         Q_EMIT statusChanged(m_status);
     }
 
-    void AccountSyncCoordinator::handleStateChangeAuthenticationError(
-        const QString& operation, const javelin::jmap::OperationError& error)
+    void AccountSyncCoordinator::handleStateChangeStatus(
+        const javelin::jmap::sync::StateChangeConnectionStatus status)
     {
+        if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
+        {
+            m_stateChangeRecovery.connected();
+            m_stateChangeAuthenticationRetryToken.reset();
+        }
+
+        setStatus(toServiceStatus(status));
+    }
+
+    void AccountSyncCoordinator::handleStateChangeError(const QString& operation,
+                                                        const javelin::jmap::OperationError& error)
+    {
+        if (javelin::jmap::isTransientError(error))
+        {
+            if (!m_stateChangeRecovery.recordTransientFailure())
+                return;
+
+            publishOperationError(operation, error);
+            return;
+        }
+
         if (!javelin::jmap::isAuthenticationError(error) || !m_settings.has_value() ||
             !m_authenticationRefreshHandler)
         {
