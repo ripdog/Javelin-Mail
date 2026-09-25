@@ -68,6 +68,7 @@ namespace javelin::gui::calendar
         void removeAttendeeRow(QWidget* row);
         void clearAttendeeRows();
         void updateRecurrenceControls();
+        void updateNotificationDefaults();
         void updateDefaultNotificationsWarning();
         void editCurrentCalendarDefaultNotifications();
         [[nodiscard]] javelin::jmap::calendar::Calendar* currentCalendar();

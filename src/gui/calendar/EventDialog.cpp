@@ -231,6 +231,7 @@ namespace javelin::gui::calendar
                 [this]()
                 {
                     m_calendarEdited = true;
+                    updateNotificationDefaults();
                     updateDefaultNotificationsWarning();
                 });
         connect(m_timeZone, &QComboBox::activated, this, [this]() { m_timeZoneEdited = true; });
@@ -349,6 +350,7 @@ namespace javelin::gui::calendar
             addAttendeeRow();
 
         m_notifications->setAlerts(event.alerts);
+        updateNotificationDefaults();
         m_notifications->setUseCalendarDefaults(event.useDefaultAlerts);
         m_notifications->resetEdited();
         updateDefaultNotificationsWarning();
@@ -559,6 +561,20 @@ namespace javelin::gui::calendar
         return found == m_calendars.end() ? nullptr : &*found;
     }
 
+    void EventDialog::updateNotificationDefaults()
+    {
+        if (m_notifications == nullptr)
+            return;
+        const auto* calendar = currentCalendar();
+        if (calendar == nullptr)
+        {
+            m_notifications->setDefaultAlerts({});
+            return;
+        }
+        m_notifications->setDefaultAlerts(m_allDay->isChecked() ? calendar->defaultAlertsWithoutTime
+                                                                : calendar->defaultAlertsWithTime);
+    }
+
     void EventDialog::updateDefaultNotificationsWarning()
     {
         if (m_defaultNotificationsWarning == nullptr || m_notifications == nullptr)
@@ -627,6 +643,7 @@ namespace javelin::gui::calendar
         };
         calendar->defaultAlertsWithTime = withTime;
         calendar->defaultAlertsWithoutTime = withoutTime;
+        updateNotificationDefaults();
         updateDefaultNotificationsWarning();
         Q_EMIT defaultNotificationsChangeRequested(accountId, calendarId, std::move(withTime),
                                                    std::move(withoutTime));
@@ -662,6 +679,7 @@ namespace javelin::gui::calendar
                 showMutationError(errorMessage);
         }
         m_pendingDefaultNotificationsChange.reset();
+        updateNotificationDefaults();
         updateDefaultNotificationsWarning();
     }
 
@@ -717,6 +735,7 @@ namespace javelin::gui::calendar
             if (m_endDate->date() <= m_startDate->date())
                 m_endDate->setDate(m_startDate->date().addDays(1));
         }
+        updateNotificationDefaults();
         updateDefaultNotificationsWarning();
     }
 

@@ -26,6 +26,8 @@ namespace javelin::gui::calendar
 
         void
         setAlerts(const std::unordered_map<std::string, javelin::jmap::calendar::Alert>& alerts);
+        void setDefaultAlerts(
+            const std::unordered_map<std::string, javelin::jmap::calendar::Alert>& alerts);
         [[nodiscard]] std::unordered_map<std::string, javelin::jmap::calendar::Alert>
         displayAlerts() const;
         void setUseCalendarDefaults(bool enabled);
@@ -49,16 +51,23 @@ namespace javelin::gui::calendar
             bool edited = false;
         };
 
+        using Alerts = std::unordered_map<std::string, javelin::jmap::calendar::Alert>;
+
         void addAlertRow(const std::optional<javelin::jmap::calendar::Alert>& alert = std::nullopt);
         void removeAlertRow(QWidget* row);
         void clearAlertRows();
         void markAlertEdited(QWidget* row);
         void updateEnabledState();
+        void showAlerts(const Alerts& alerts);
+        [[nodiscard]] Alerts eventAlertsFromRows() const;
+        void captureEventAlerts();
 
         QCheckBox* m_useCalendarDefaults = nullptr;
         QVBoxLayout* m_rowsLayout = nullptr;
         QPushButton* m_addAlert = nullptr;
         std::vector<AlertRow> m_rows;
+        Alerts m_eventAlerts;
+        Alerts m_defaultAlerts;
         bool m_edited = false;
         bool m_loading = false;
     };

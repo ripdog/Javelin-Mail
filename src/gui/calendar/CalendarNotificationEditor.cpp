@@ -85,12 +85,17 @@ namespace javelin::gui::calendar
             m_useCalendarDefaults = new QCheckBox(i18n("Use calendar default notifications"), this);
             m_rowsLayout->addWidget(m_useCalendarDefaults);
             connect(m_useCalendarDefaults, &QCheckBox::toggled, this,
-                    [this]
+                    [this](const bool enabled)
                     {
                         if (!m_loading)
+                        {
+                            if (enabled)
+                                captureEventAlerts();
                             m_edited = true;
+                            showAlerts(enabled ? m_defaultAlerts : m_eventAlerts);
+                        }
                         updateEnabledState();
-                        Q_EMIT useCalendarDefaultsChanged(m_useCalendarDefaults->isChecked());
+                        Q_EMIT useCalendarDefaultsChanged(enabled);
                     });
         }
         m_addAlert = new QPushButton(i18n("+ Add notification"), this);
@@ -107,56 +112,51 @@ namespace javelin::gui::calendar
     void CalendarNotificationEditor::setAlerts(
         const std::unordered_map<std::string, javelin::jmap::calendar::Alert>& alerts)
     {
-        m_loading = true;
-        clearAlertRows();
+        m_eventAlerts.clear();
         for (const auto& [id, alert] : alerts)
-        {
-            Q_UNUSED(id);
             if (alert.action == "display" &&
                 alert.triggerKind == javelin::jmap::calendar::AlertTriggerKind::Offset)
-                addAlertRow(alert);
-        }
-        updateEnabledState();
+                m_eventAlerts.emplace(id, alert);
+
+        m_loading = true;
+        if (!useCalendarDefaults())
+            showAlerts(m_eventAlerts);
         m_loading = false;
         m_edited = false;
+    }
+
+    void CalendarNotificationEditor::setDefaultAlerts(
+        const std::unordered_map<std::string, javelin::jmap::calendar::Alert>& alerts)
+    {
+        m_defaultAlerts.clear();
+        for (const auto& [id, alert] : alerts)
+            if (alert.action == "display" &&
+                alert.triggerKind == javelin::jmap::calendar::AlertTriggerKind::Offset)
+                m_defaultAlerts.emplace(id, alert);
+
+        if (!useCalendarDefaults())
+            return;
+        const bool wasLoading = m_loading;
+        m_loading = true;
+        showAlerts(m_defaultAlerts);
+        m_loading = wasLoading;
     }
 
     std::unordered_map<std::string, javelin::jmap::calendar::Alert>
     CalendarNotificationEditor::displayAlerts() const
     {
-        std::unordered_map<std::string, javelin::jmap::calendar::Alert> result;
-        result.reserve(m_rows.size());
-        for (const auto& row : m_rows)
-        {
-            if (!row.edited)
-            {
-                result.emplace(row.id, row.original);
-                continue;
-            }
-
-            auto alert = row.original;
-            alert.id = row.id;
-            alert.action = "display";
-            alert.triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset;
-            const auto relation = row.relation->currentData().toString();
-            alert.relativeTo = relation.endsWith(QStringLiteral("end")) ? "end" : "start";
-            alert.offset = javelin::jmap::calendar::Duration{
-                .value = signedDuration(row.amount->value(), row.unit->currentData().toInt(),
-                                        relation.startsWith(QStringLiteral("before")))};
-            alert.when = std::nullopt;
-            if (row.edited)
-                alert.acknowledged = std::nullopt;
-            result.emplace(alert.id, std::move(alert));
-        }
-        return result;
+        return useCalendarDefaults() ? m_eventAlerts : eventAlertsFromRows();
     }
 
     void CalendarNotificationEditor::setUseCalendarDefaults(const bool enabled)
     {
         if (m_useCalendarDefaults == nullptr)
             return;
+        if (enabled && !useCalendarDefaults())
+            captureEventAlerts();
         m_loading = true;
         m_useCalendarDefaults->setChecked(enabled);
+        showAlerts(enabled ? m_defaultAlerts : m_eventAlerts);
         updateEnabledState();
         m_loading = false;
     }
@@ -269,6 +269,50 @@ namespace javelin::gui::calendar
             found->edited = true;
         if (!m_loading)
             m_edited = true;
+    }
+
+    void CalendarNotificationEditor::showAlerts(const Alerts& alerts)
+    {
+        clearAlertRows();
+        for (const auto& [id, alert] : alerts)
+        {
+            Q_UNUSED(id);
+            addAlertRow(alert);
+        }
+        updateEnabledState();
+    }
+
+    CalendarNotificationEditor::Alerts CalendarNotificationEditor::eventAlertsFromRows() const
+    {
+        Alerts result;
+        result.reserve(m_rows.size());
+        for (const auto& row : m_rows)
+        {
+            if (!row.edited)
+            {
+                result.emplace(row.id, row.original);
+                continue;
+            }
+
+            auto alert = row.original;
+            alert.id = row.id;
+            alert.action = "display";
+            alert.triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset;
+            const auto relation = row.relation->currentData().toString();
+            alert.relativeTo = relation.endsWith(QStringLiteral("end")) ? "end" : "start";
+            alert.offset = javelin::jmap::calendar::Duration{
+                .value = signedDuration(row.amount->value(), row.unit->currentData().toInt(),
+                                        relation.startsWith(QStringLiteral("before")))};
+            alert.when = std::nullopt;
+            alert.acknowledged = std::nullopt;
+            result.emplace(alert.id, std::move(alert));
+        }
+        return result;
+    }
+
+    void CalendarNotificationEditor::captureEventAlerts()
+    {
+        m_eventAlerts = eventAlertsFromRows();
     }
 
     void CalendarNotificationEditor::updateEnabledState()

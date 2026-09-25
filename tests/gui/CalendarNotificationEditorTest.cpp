@@ -9,11 +9,13 @@
 #include <QCheckBox>
 #include <QDateTimeEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <ranges>
 
 TEST_CASE("calendar notification editor exposes relative reminders only",
@@ -153,6 +155,104 @@ TEST_CASE("event notification edits preserve legacy absolute reminders",
     CHECK(edited.alerts.at("absolute").when == event.alerts.at("absolute").when);
 }
 
+TEST_CASE("event editor shows effective calendar defaults and preserves dormant event alerts",
+          "[gui][calendar][notifications][defaults]")
+{
+    const javelin::jmap::calendar::Alert defaultAlert{
+        .id = "default-10",
+        .action = "display",
+        .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+        .relativeTo = "start",
+        .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+        .when = std::nullopt,
+        .acknowledged = std::nullopt,
+    };
+    auto acknowledgedDefault = defaultAlert;
+    acknowledgedDefault.acknowledged =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-09-25T14:22:48Z"};
+    const javelin::jmap::calendar::Alert dormantAlert{
+        .id = "event-30",
+        .action = "display",
+        .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+        .relativeTo = "start",
+        .offset = javelin::jmap::calendar::Duration{.value = "-PT30M"},
+        .when = std::nullopt,
+        .acknowledged = javelin::jmap::calendar::UtcInstant{.value = "2026-09-04T18:20:22Z"},
+    };
+    const javelin::jmap::calendar::Calendar calendar{
+        .accountId = "account",
+        .id = "calendar",
+        .name = "Calendar",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {{"default-10", defaultAlert}},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayWriteAll = true},
+    };
+    javelin::jmap::calendar::CalendarEvent event;
+    event.accountId = "account";
+    event.id = "event";
+    event.uid = "uid";
+    event.calendarIds = {{"calendar", true}};
+    event.title = "Event";
+    event.start = {.value = "2026-09-26T12:00:00"};
+    event.duration = {.value = "PT1H"};
+    event.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"};
+    event.useDefaultAlerts = true;
+    event.alerts = {{"event-30", dormantAlert}, {"default-10", acknowledgedDefault}};
+
+    javelin::gui::calendar::EventDialog dialog{{calendar}};
+    dialog.setEvent(event);
+
+    auto amounts = [&dialog]
+    {
+        std::vector<int> values;
+        for (const auto* spin : dialog.findChildren<QSpinBox*>())
+            values.push_back(spin->value());
+        return values;
+    };
+
+    auto values = amounts();
+    REQUIRE(values.size() == 1);
+    CHECK(values.front() == 10);
+
+    const auto checkBoxes = dialog.findChildren<QCheckBox*>();
+    const auto useDefaults = std::ranges::find_if(
+        checkBoxes, [](const auto* checkBox)
+        { return checkBox->text().contains(QStringLiteral("default notifications")); });
+    REQUIRE(useDefaults != checkBoxes.end());
+
+    (*useDefaults)->setChecked(false);
+    values = amounts();
+    REQUIRE(values.size() == 2);
+    CHECK(std::ranges::count(values, 10) == 1);
+    CHECK(std::ranges::count(values, 30) == 1);
+
+    auto edited = dialog.eventDocument();
+    CHECK_FALSE(edited.useDefaultAlerts);
+    REQUIRE(edited.alerts.contains("event-30"));
+    REQUIRE(edited.alerts.contains("default-10"));
+    CHECK(edited.alerts.at("event-30").acknowledged == dormantAlert.acknowledged);
+    CHECK(edited.alerts.at("default-10").acknowledged == acknowledgedDefault.acknowledged);
+
+    (*useDefaults)->setChecked(true);
+    values = amounts();
+    REQUIRE(values.size() == 1);
+    CHECK(values.front() == 10);
+
+    edited = dialog.eventDocument();
+    CHECK(edited.useDefaultAlerts);
+    REQUIRE(edited.alerts.contains("event-30"));
+    REQUIRE(edited.alerts.contains("default-10"));
+    CHECK(edited.alerts.at("event-30").acknowledged == dormantAlert.acknowledged);
+    CHECK(edited.alerts.at("default-10").acknowledged == acknowledgedDefault.acknowledged);
+}
+
 TEST_CASE("event default notification warning follows the applicable calendar defaults",
           "[gui][calendar][notifications][warning]")
 {
@@ -205,6 +305,7 @@ TEST_CASE("event default notification warning follows the applicable calendar de
     REQUIRE(allDay != checkBoxes.end());
     (*allDay)->setChecked(true);
 
+    CHECK(dialog.findChildren<QSpinBox*>().empty());
     CHECK_FALSE(warning->isHidden());
     CHECK(warning->text().contains(QStringLiteral("all-day")));
     CHECK(warning->text().contains(QStringLiteral("No display notification will be shown")));

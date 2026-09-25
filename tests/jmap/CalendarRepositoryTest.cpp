@@ -1757,15 +1757,14 @@ TEST_CASE("calendar reminders use their actual trigger rather than occurrence st
     defaultlessEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
     defaultlessEvent.useDefaultAlerts = true;
     defaultlessEvent.alerts.emplace(
-        "fallback-event-alert",
-        javelin::jmap::calendar::Alert{
-            .id = "fallback-event-alert",
-            .action = "display",
-            .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
-            .relativeTo = "start",
-            .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
-            .when = std::nullopt,
-            .acknowledged = std::nullopt});
+        "ignored-event-alert", javelin::jmap::calendar::Alert{
+                                   .id = "ignored-event-alert",
+                                   .action = "display",
+                                   .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                                   .relativeTo = "start",
+                                   .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                                   .when = std::nullopt,
+                                   .acknowledged = std::nullopt});
     auto defaultlessOccurrence = occurrence("defaultless-event", "2026-07-18T10:00:00");
     defaultlessOccurrence.utcStart =
         javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
@@ -1798,13 +1797,13 @@ TEST_CASE("calendar reminders use their actual trigger rather than occurrence st
             due));
     const auto& candidates =
         std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(due);
-    REQUIRE(candidates.size() == 3);
+    REQUIRE(candidates.size() == 2);
     CHECK(std::ranges::count(candidates, std::string{"before-end"},
                              &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
     CHECK(std::ranges::count(candidates, std::string{"absolute"},
                              &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
-    CHECK(std::ranges::count(candidates, std::string{"fallback-event-alert"},
-                             &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
+    CHECK(std::ranges::count(candidates, std::string{"ignored-event-alert"},
+                             &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 0);
 }
 
 TEST_CASE("calendar invitations reconcile atomically and rejected RSVP does not alert twice",

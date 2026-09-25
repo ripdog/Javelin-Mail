@@ -341,10 +341,9 @@ namespace javelin::jmap::cache
                 QDateTime::fromString(query.value(3).toString(), Qt::ISODateWithMs).toUTC();
             const QDateTime endsAt =
                 QDateTime::fromString(query.value(4).toString(), Qt::ISODateWithMs).toUTC();
-            auto effectiveAlerts = parsed.value->alerts;
+            std::unordered_map<std::string, calendar::Alert> effectiveAlerts;
             if (parsed.value->useDefaultAlerts)
             {
-                std::unordered_map<std::string, calendar::Alert> defaultAlerts;
                 QSqlQuery defaults{database};
                 defaults.prepare(QStringLiteral(
                     "SELECT d.alert_id,d.action,d.trigger_kind,d.relative_to,d.offset,"
@@ -392,10 +391,12 @@ namespace javelin::jmap::cache
                     if (const auto overridden = parsed.value->alerts.find(alertId);
                         overridden != parsed.value->alerts.end() && overridden->second.acknowledged)
                         alert.acknowledged = overridden->second.acknowledged;
-                    defaultAlerts.emplace(alertId, std::move(alert));
+                    effectiveAlerts.emplace(alertId, std::move(alert));
                 }
-                if (!defaultAlerts.empty())
-                    effectiveAlerts = std::move(defaultAlerts);
+            }
+            else
+            {
+                effectiveAlerts = parsed.value->alerts;
             }
             for (const auto& [alertId, alert] : effectiveAlerts)
             {
