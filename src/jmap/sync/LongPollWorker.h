@@ -6,12 +6,14 @@
 #include <QCoroTask>
 
 #include <chrono>
+#include <cstddef>
 #include <optional>
 
 namespace javelin::jmap::sync
 {
 
-    using StateChangeErrorCallback = std::function<void(const javelin::jmap::OperationError&)>;
+    using StateChangeErrorCallback =
+        std::function<void(const javelin::jmap::OperationError&, std::size_t)>;
 
     struct BackoffPolicy
     {

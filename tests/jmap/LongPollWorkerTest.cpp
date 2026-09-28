@@ -68,6 +68,27 @@ namespace
         }
     };
 
+    class ScriptedStateChangeSource final : public javelin::jmap::sync::StateChangeSource
+    {
+      public:
+        std::vector<javelin::jmap::sync::StateChangeSubscription> subscriptions;
+        std::vector<javelin::jmap::sync::StateChangeSourceResult> results;
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sync::StateChangeSourceResult>
+        consume(javelin::jmap::sync::StateChangeSubscription subscription,
+                javelin::jmap::sync::StateChangeConsumer& consumer,
+                javelin::jmap::sync::StateChangeCancellation& cancellation) override
+        {
+            Q_UNUSED(consumer);
+            Q_UNUSED(cancellation);
+            subscriptions.push_back(std::move(subscription));
+            REQUIRE_FALSE(results.empty());
+            auto result = std::move(results.front());
+            results.erase(results.begin());
+            co_return result;
+        }
+    };
+
     class FakeStateChangeConsumer final : public javelin::jmap::sync::StateChangeConsumer
     {
       public:
@@ -231,6 +252,7 @@ TEST_CASE("state-change worker backs off and retries after transient transport f
     consumer.cancelAfterUpdates = 1;
     FakeStateChangeSleeper sleeper;
     std::vector<javelin::jmap::OperationErrorCode> reportedErrors;
+    std::vector<std::size_t> reportedAttempts;
 
     const javelin::jmap::sync::StateChangeWorker worker{
         source,
@@ -241,8 +263,12 @@ TEST_CASE("state-change worker backs off and retries after transient transport f
             .maxDelay = std::chrono::milliseconds{2000},
         },
         {},
-        [&reportedErrors](const javelin::jmap::OperationError& error)
-        { reportedErrors.push_back(error.code); }};
+        [&reportedErrors, &reportedAttempts](const javelin::jmap::OperationError& error,
+                                             const std::size_t consecutiveFailures)
+        {
+            reportedErrors.push_back(error.code);
+            reportedAttempts.push_back(consecutiveFailures);
+        }};
     const auto summary = QCoro::waitFor(worker.run(makeSubscription(), cancellation));
 
     CHECK(summary.successfulSubscriptions == 1);
@@ -252,6 +278,62 @@ TEST_CASE("state-change worker backs off and retries after transient transport f
                                 std::chrono::milliseconds{500}, std::chrono::milliseconds{1000}});
     CHECK(reportedErrors == std::vector{javelin::jmap::OperationErrorCode::NetworkUnavailable,
                                         javelin::jmap::OperationErrorCode::ServerUnavailable});
+    CHECK(reportedAttempts == std::vector<std::size_t>{1, 2});
+}
+
+TEST_CASE("state-change worker resets the failure attempt after a healthy stream boundary",
+          "[jmap][sync][recovery]")
+{
+    ensureApplication();
+
+    ScriptedStateChangeSource source;
+    source.results = {
+        javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "first failure",
+            .httpStatus = std::nullopt,
+        },
+        javelin::jmap::sync::StateChangeStreamSummary{
+            .lastState = "state-1",
+            .updateCount = 0,
+        },
+        javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "failure after recovery",
+            .httpStatus = std::nullopt,
+        },
+    };
+
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+    FakeStateChangeConsumer consumer;
+    FakeStateChangeSleeper sleeper;
+    std::vector<std::size_t> reportedAttempts;
+
+    const javelin::jmap::sync::StateChangeWorker worker{
+        source,
+        consumer,
+        sleeper,
+        javelin::jmap::sync::BackoffPolicy{
+            .initialDelay = std::chrono::milliseconds{500},
+            .maxDelay = std::chrono::milliseconds{2000},
+        },
+        {},
+        [&reportedAttempts, &cancellation](const javelin::jmap::OperationError&,
+                                           const std::size_t consecutiveFailures)
+        {
+            reportedAttempts.push_back(consecutiveFailures);
+            if (reportedAttempts.size() == 2)
+                cancellation.cancel();
+        }};
+
+    const auto summary = QCoro::waitFor(worker.run(makeSubscription(), cancellation));
+
+    CHECK(reportedAttempts == std::vector<std::size_t>{1, 1});
+    CHECK(sleeper.delays == std::vector<std::chrono::milliseconds>{std::chrono::milliseconds{500},
+                                                                   std::chrono::milliseconds{500}});
+    CHECK(summary.transientFailures == 2);
+    CHECK(summary.cancelled);
+    CHECK(source.subscriptions.size() == 3);
 }
 
 TEST_CASE("state-change worker exits immediately when transport reports cancellation",

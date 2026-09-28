@@ -83,23 +83,23 @@ namespace javelin::jmap::sync
                 }
 
                 const auto classified = javelin::jmap::operationError(error);
-                if (m_errorCallback)
-                    m_errorCallback(classified);
                 if (!javelin::jmap::isTransientError(classified))
                 {
+                    if (m_errorCallback)
+                        m_errorCallback(classified, 0);
                     if (m_statusCallback)
                         m_statusCallback(StateChangeConnectionStatus::Disconnected);
                     summary.terminalError = classified;
                     break;
                 }
 
-                if (m_statusCallback)
-                {
-                    m_statusCallback(StateChangeConnectionStatus::Disconnected);
-                }
-
                 ++summary.transientFailures;
                 ++consecutiveFailures;
+                if (m_errorCallback)
+                    m_errorCallback(classified, consecutiveFailures);
+                if (m_statusCallback)
+                    m_statusCallback(StateChangeConnectionStatus::Disconnected);
+
                 const auto delay = m_backoffPolicy.delayForAttempt(consecutiveFailures);
                 if (delay.count() > 0)
                 {

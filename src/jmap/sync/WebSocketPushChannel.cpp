@@ -178,6 +178,7 @@ namespace javelin::jmap::sync
                 .httpStatus = std::nullopt,
             };
         }
+        bool protocolActivityReceived = false;
         std::deque<QString> messages;
         QObject::connect(&socket, &QWebSocket::textMessageReceived, &socket,
                          [&messages, &activity](QString message)
@@ -186,8 +187,9 @@ namespace javelin::jmap::sync
                              messages.push_back(std::move(message));
                          });
         QObject::connect(&socket, &QWebSocket::pong, &socket,
-                         [&activity](quint64, const QByteArray&)
+                         [&activity, &protocolActivityReceived](quint64, const QByteArray&)
                          {
+                             protocolActivityReceived = true;
                              activity.recordActivity();
                              qCDebug(logWebSocket).noquote()
                                  << "server ping interval" << requestedPushPingInterval.count()
@@ -219,10 +221,17 @@ namespace javelin::jmap::sync
         {
             if (socket.state() != QAbstractSocket::ConnectedState)
             {
-                qCWarning(logWebSocket) << "disconnected" << socket.errorString();
+                if (protocolActivityReceived || stream.summary().updateCount > 0)
+                {
+                    qCInfo(logWebSocket) << "healthy stream disconnected; reconnecting";
+                    co_return stream.summary();
+                }
+
+                qCWarning(logWebSocket)
+                    << "disconnected before protocol activity" << socket.errorString();
                 co_return javelin::jmap::api::TransportError{
                     .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
-                    .message = "JMAP WebSocket disconnected.",
+                    .message = "JMAP WebSocket disconnected before protocol activity.",
                     .httpStatus = std::nullopt,
                 };
             }
@@ -247,8 +256,14 @@ namespace javelin::jmap::sync
 
             std::string buffer = messages.front().toStdString();
             messages.pop_front();
-            auto outcome = co_await stream.accept(parseWebSocketPushMessage(
-                stream.subscription(), stream.summary().lastState, buffer));
+            auto parsed = parseWebSocketPushMessage(stream.subscription(),
+                                                    stream.summary().lastState, buffer);
+            const bool parsedProtocolActivity = std::holds_alternative<PushPing>(parsed) ||
+                                                std::holds_alternative<StateChangeEvent>(parsed) ||
+                                                std::holds_alternative<CalendarAlertEvent>(parsed);
+            auto outcome = co_await stream.accept(std::move(parsed));
+            if (!std::holds_alternative<PushStreamProtocolFailure>(outcome))
+                protocolActivityReceived = protocolActivityReceived || parsedProtocolActivity;
             if (const auto* error = std::get_if<PushStreamProtocolFailure>(&outcome))
             {
                 qCWarning(logWebSocket).noquote()

@@ -3,6 +3,7 @@
 #include "app/WorkScheduler.h"
 #include "jmap/sync/StateChangeSource.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <ranges>
 #include <span>
@@ -26,53 +27,14 @@ namespace javelin::app
         std::size_t failedConnectionAttemptsBeforeIncident = 3;
     };
 
-    class StateChangeRecoveryTracker final
+    [[nodiscard]] inline bool
+    shouldReportStateChangeIncident(const StateChangeRecoveryPolicy policy,
+                                    const std::size_t consecutiveTransientFailures)
     {
-      public:
-        explicit StateChangeRecoveryTracker(StateChangeRecoveryPolicy policy = {})
-            : m_policy(policy)
-        {
-        }
-
-        void reset()
-        {
-            m_connectionEstablished = false;
-            m_incidentReported = false;
-            m_failedConnectionAttempts = 0;
-        }
-
-        void connected()
-        {
-            m_connectionEstablished = true;
-            m_incidentReported = false;
-            m_failedConnectionAttempts = 0;
-        }
-
-        [[nodiscard]] bool recordTransientFailure()
-        {
-            if (m_connectionEstablished)
-            {
-                m_connectionEstablished = false;
-                m_failedConnectionAttempts = 0;
-                return false;
-            }
-            if (m_incidentReported)
-                return false;
-
-            ++m_failedConnectionAttempts;
-            if (m_failedConnectionAttempts < m_policy.failedConnectionAttemptsBeforeIncident)
-                return false;
-
-            m_incidentReported = true;
-            return true;
-        }
-
-      private:
-        StateChangeRecoveryPolicy m_policy;
-        bool m_connectionEstablished = false;
-        bool m_incidentReported = false;
-        std::size_t m_failedConnectionAttempts = 0;
-    };
+        const auto threshold =
+            std::max<std::size_t>(1, policy.failedConnectionAttemptsBeforeIncident);
+        return consecutiveTransientFailures == threshold;
+    }
 
     struct RoutedStateChanges
     {

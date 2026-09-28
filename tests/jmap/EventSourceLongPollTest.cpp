@@ -336,6 +336,50 @@ TEST_CASE("event source reports connected after validating a stream response",
     CHECK(connectedReports == 1);
 }
 
+TEST_CASE("event source treats a pinged stream closure as a normal reconnect boundary",
+          "[jmap][push][event-source][recovery]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost, 0));
+
+    const QByteArray body{"event: ping\ndata: {\"interval\":30}\n\n"};
+    QByteArray response{"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "};
+    response += QByteArray::number(body.size());
+    response += "\r\nConnection: close\r\n\r\n";
+    response += body;
+    serveHttpResponseOnce(server, std::move(response));
+
+    QNetworkAccessManager networkAccessManager;
+    std::size_t connectedReports = 0;
+    const auto endpoint =
+        QStringLiteral("http://127.0.0.1:%1/events").arg(server.serverPort()).toStdString();
+    javelin::jmap::sync::EventSourceStateChangeSource source{
+        networkAccessManager, endpoint, "token",
+        [&connectedReports](const javelin::jmap::sync::StateChangeConnectionStatus status)
+        {
+            if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
+                ++connectedReports;
+        }};
+    RecordingConsumer consumer;
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+
+    const auto result = QCoro::waitFor(source.consume(
+        {
+            .accountId = "account-1",
+            .lastState = {},
+            .types = {"Email"},
+            .groupwareAccountIds = {},
+        },
+        consumer, cancellation));
+
+    const auto* summary = std::get_if<javelin::jmap::sync::StateChangeStreamSummary>(&result);
+    REQUIRE(summary != nullptr);
+    CHECK(summary->updateCount == 0);
+    CHECK(connectedReports >= 2);
+}
+
 TEST_CASE("push activity tracking shares status and timeout state", "[jmap][push]")
 {
     std::size_t connectedReports = 0;

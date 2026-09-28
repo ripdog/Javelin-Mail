@@ -93,7 +93,7 @@ namespace javelin::app
           m_mailboxReader(mailboxReader), m_workScheduler(workScheduler),
           m_mailQueryRefreshPort(mailQueryRefreshPort), m_endpointRetryGate(endpointRetryGate),
           m_authenticationRefreshHandler(std::move(authenticationRefreshHandler)),
-          m_stateChangeRecovery(stateChangeRecoveryPolicy)
+          m_stateChangeRecoveryPolicy(stateChangeRecoveryPolicy)
     {
         m_refreshClock.start();
         m_refreshDebounceTimer.setSingleShot(true);
@@ -256,7 +256,6 @@ namespace javelin::app
         m_pendingContactStateChanges.clear();
         m_pendingIdentityStateChanges.clear();
         m_authenticationRecoveryInFlight = false;
-        m_stateChangeRecovery.reset();
         m_refreshDebounceTimer.stop();
         m_groupwareRetryTimer.stop();
         m_notificationBaselineRetryTimer.stop();
@@ -1245,11 +1244,14 @@ namespace javelin::app
         runContext->worker = std::make_unique<javelin::jmap::sync::StateChangeWorker>(
             *runContext->source, *this, runContext->sleeper, javelin::jmap::sync::BackoffPolicy{},
             stateChangeStatusCallback,
-            [this, generation = runContext->generation](const javelin::jmap::OperationError& error)
+            [this,
+             generation = runContext->generation](const javelin::jmap::OperationError& error,
+                                                  const std::size_t consecutiveTransientFailures)
             {
                 if (m_runContext == nullptr || m_runContext->generation != generation)
                     return;
-                handleStateChangeError(QStringLiteral("Maintain account connection"), error);
+                handleStateChangeError(QStringLiteral("Maintain account connection"), error,
+                                       consecutiveTransientFailures);
             });
 
         m_runContext = runContext;
@@ -1298,20 +1300,27 @@ namespace javelin::app
         const javelin::jmap::sync::StateChangeConnectionStatus status)
     {
         if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
-        {
-            m_stateChangeRecovery.connected();
             m_stateChangeAuthenticationRetryToken.reset();
-        }
 
         setStatus(toServiceStatus(status));
     }
 
-    void AccountSyncCoordinator::handleStateChangeError(const QString& operation,
-                                                        const javelin::jmap::OperationError& error)
+    void
+    AccountSyncCoordinator::handleStateChangeError(const QString& operation,
+                                                   const javelin::jmap::OperationError& error,
+                                                   const std::size_t consecutiveTransientFailures)
     {
         if (javelin::jmap::isTransientError(error))
         {
-            if (!m_stateChangeRecovery.recordTransientFailure())
+            const auto threshold = std::max<std::size_t>(
+                1, m_stateChangeRecoveryPolicy.failedConnectionAttemptsBeforeIncident);
+            const bool reportIncident = shouldReportStateChangeIncident(
+                m_stateChangeRecoveryPolicy, consecutiveTransientFailures);
+            qDebug().noquote()
+                << "State-change reconnect failure"
+                << QStringLiteral("attempt=%1/%2").arg(consecutiveTransientFailures).arg(threshold)
+                << QStringLiteral("reportIncident=%1").arg(reportIncident);
+            if (!reportIncident)
                 return;
 
             publishOperationError(operation, error);

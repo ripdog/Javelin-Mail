@@ -197,7 +197,8 @@ namespace javelin::app
         void setStatus(Status status);
         void handleStateChangeStatus(javelin::jmap::sync::StateChangeConnectionStatus status);
         void handleStateChangeError(const QString& operation,
-                                    const javelin::jmap::OperationError& error);
+                                    const javelin::jmap::OperationError& error,
+                                    std::size_t consecutiveTransientFailures);
         [[nodiscard]] QCoro::Task<void>
         recoverStateChangeAuthentication(QString operation, javelin::jmap::OperationError error,
                                          std::size_t generation, std::string accountId,
@@ -219,7 +220,7 @@ namespace javelin::app
         MailQueryRefreshPort& m_mailQueryRefreshPort;
         EndpointRetryGate& m_endpointRetryGate;
         javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
-        StateChangeRecoveryTracker m_stateChangeRecovery;
+        StateChangeRecoveryPolicy m_stateChangeRecoveryPolicy;
         std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;
         std::vector<std::string> m_mailboxIds;

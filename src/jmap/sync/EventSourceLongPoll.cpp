@@ -295,6 +295,7 @@ namespace javelin::jmap::sync
 
         PushStreamSession stream{std::move(subscription), consumer};
         bool responseHeadersValidated = false;
+        bool protocolActivityReceived = false;
         QObject::connect(reply.data(), &QNetworkReply::metaDataChanged, reply.data(),
                          [reply, &activity, &responseHeadersValidated]()
                          {
@@ -332,12 +333,17 @@ namespace javelin::jmap::sync
 
             auto parsed = parseEventSourcePushMessage(
                 stream.subscription(), stream.summary().lastState, eventName, eventId, eventData);
+            const bool parsedProtocolActivity = std::holds_alternative<PushPing>(parsed) ||
+                                                std::holds_alternative<StateChangeEvent>(parsed) ||
+                                                std::holds_alternative<CalendarAlertEvent>(parsed);
             const auto parsedEventName = eventName;
             const auto parsedEventId = eventId;
             const auto parsedEventData = eventData;
             resetEvent();
 
             auto outcome = co_await stream.accept(std::move(parsed));
+            if (!std::holds_alternative<PushStreamProtocolFailure>(outcome))
+                protocolActivityReceived = protocolActivityReceived || parsedProtocolActivity;
             if (const auto* ping = std::get_if<PushStreamPing>(&outcome))
             {
                 activity.setTimeout(pushActivityTimeout(ping->interval));
@@ -530,17 +536,20 @@ namespace javelin::jmap::sync
                                                  "Event-source reply was destroyed.");
                 }
 
-                if (stream.summary().updateCount > 0)
+                if (stream.summary().updateCount > 0 || protocolActivityReceived)
                 {
+                    qCDebug(logEventSource).noquote()
+                        << "healthy event-source stream closed; reconnecting"
+                        << activity.serverBaseUrl();
                     co_return stream.summary();
                 }
 
                 qWarning().noquote()
-                    << "State-change source closed before a state event was received"
+                    << "State-change source closed before protocol activity was received"
                     << reply->url().toString() << statusCode << summarizeBody(pendingBuffer);
                 co_return makeTransportError(
                     javelin::jmap::api::TransportErrorCode::NetworkFailure,
-                    "Event-source connection closed before a state event was received.",
+                    "Event-source connection closed before protocol activity was received.",
                     statusCode > 0 ? std::optional{statusCode} : std::nullopt);
             }
         }
