@@ -122,6 +122,43 @@ TEST_CASE("authentication action detector rejects common numeric false positives
         CHECK_FALSE(result.action.has_value());
         CHECK(result.debugSummary().contains(QStringLiteral("phone number")));
     }
+
+    SECTION("shopping does not count as PIN authentication context")
+    {
+        const auto result = detector.detect({
+            .subject = QStringLiteral("Updated Comixology app and shopping experience are here!"),
+            .plainText = QStringLiteral("Campaign reference 009595"),
+            .html = {},
+        });
+
+        CHECK_FALSE(result.action.has_value());
+    }
+
+    SECTION("time suffix does not become an alphanumeric code")
+    {
+        const auto result = detector.detect({
+            .subject =
+                QStringLiteral("Update #62 from Code 8 - a film from Robbie & Stephen Amell"),
+            .plainText = QStringLiteral("posted by Robbie Amell Aug 20, 2025 • 6:25AM PDT"),
+            .html = {},
+        });
+
+        CHECK_FALSE(result.action.has_value());
+        CHECK(result.debugSummary().contains(QStringLiteral("part of a time")));
+    }
+
+    SECTION("Tapping does not count as PIN authentication context")
+    {
+        const auto result = detector.detect({
+            .subject = QStringLiteral(
+                "Harder, Better, Faster, Stronger, Prettier - These Weeks in Firefox"),
+            .plainText =
+                QStringLiteral("Bug 1680865 - Tapping the Search or enter address touch bar item."),
+            .html = {},
+        });
+
+        CHECK_FALSE(result.action.has_value());
+    }
 }
 
 TEST_CASE("authentication action detector finds high-confidence HTML action links",
@@ -143,6 +180,39 @@ TEST_CASE("authentication action detector finds high-confidence HTML action link
           QStringLiteral("https://accounts.example.test/auth/magic?token=secret-value"));
     CHECK(result.debugSummary().contains(QStringLiteral("host=accounts.example.test")));
     CHECK_FALSE(result.debugSummary().contains(QStringLiteral("secret-value")));
+}
+
+TEST_CASE("authentication action detector requires corroboration for generic verify links",
+          "[cache][message-auth-action]")
+{
+    MessageAuthActionDetector detector;
+
+    SECTION("developer verify wording alone is insufficient")
+    {
+        const auto result = detector.detect({
+            .subject = QStringLiteral("These Weeks in Firefox"),
+            .plainText = QStringLiteral("Recent development work"),
+            .html =
+                QStringLiteral("<a href=\"https://bugzilla.mozilla.org/show_bug.cgi?id=1824870\">"
+                               "Fixed a test-verify permafailure caused by an incomplete teardown"
+                               "</a>"),
+        });
+
+        CHECK_FALSE(result.action.has_value());
+    }
+
+    SECTION("verify link with authentication context still passes")
+    {
+        const auto result = detector.detect({
+            .subject = QStringLiteral("Verify your email"),
+            .plainText = QStringLiteral("Please verify your email address to finish signing in."),
+            .html = QStringLiteral(
+                "<a href=\"https://accounts.example.test/verify?token=secret\">Verify</a>"),
+        });
+
+        REQUIRE(result.action.has_value());
+        CHECK(result.action->kind == MessageAuthActionKind::OpenLink);
+    }
 }
 
 TEST_CASE("authentication action detector rejects footer links", "[cache][message-auth-action]")

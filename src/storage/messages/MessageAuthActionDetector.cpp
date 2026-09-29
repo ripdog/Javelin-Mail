@@ -75,9 +75,36 @@ namespace javelin::jmap::cache
                                        { return text.contains(term, Qt::CaseInsensitive); });
         }
 
+        [[nodiscard]] bool containsWholeTerm(const QString& text, const QStringView term)
+        {
+            qsizetype from = 0;
+            while (from < text.size())
+            {
+                const auto start = text.indexOf(term, from, Qt::CaseInsensitive);
+                if (start < 0)
+                    return false;
+
+                const auto end = start + term.size();
+                const bool startsAtBoundary = start == 0 || !text.at(start - 1).isLetterOrNumber();
+                const bool endsAtBoundary = end == text.size() || !text.at(end).isLetterOrNumber();
+                if (startsAtBoundary && endsAtBoundary)
+                    return true;
+
+                from = start + 1;
+            }
+            return false;
+        }
+
+        [[nodiscard]] bool containsAnyWholeTerm(const QString& text,
+                                                const std::initializer_list<QStringView> terms)
+        {
+            return std::ranges::any_of(terms, [&text](const QStringView term)
+                                       { return containsWholeTerm(text, term); });
+        }
+
         [[nodiscard]] bool hasStrongAuthContext(const QString& text)
         {
-            return containsAny(
+            return containsAnyWholeTerm(
                 text, {QStringView{u"verification code"}, QStringView{u"security code"},
                        QStringView{u"login code"}, QStringView{u"sign in code"},
                        QStringView{u"sign-in code"}, QStringView{u"one time code"},
@@ -90,7 +117,7 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] bool hasGenericCodeContext(const QString& text)
         {
-            return containsAny(text, {QStringView{u"code"}});
+            return containsWholeTerm(text, QStringView{u"code"});
         }
 
         [[nodiscard]] bool hasNegativeNumberContext(const QString& text)
@@ -143,6 +170,27 @@ namespace javelin::jmap::cache
         {
             return static_cast<int>(std::ranges::count_if(value, [](const QChar character)
                                                           { return character.isDigit(); }));
+        }
+
+        [[nodiscard]] bool isInsideTimeOfDay(const QString& text, const qsizetype start,
+                                             const qsizetype length)
+        {
+            static const QRegularExpression timePattern{
+                QStringLiteral(R"(\b(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:[AaPp][Mm])?\b)")};
+
+            const auto contextStart = std::max<qsizetype>(0, start - 8);
+            const auto context = text.mid(contextStart, length + 16);
+            auto matches = timePattern.globalMatch(context);
+            while (matches.hasNext())
+            {
+                const auto match = matches.next();
+                if (overlaps(start, length, contextStart + match.capturedStart(),
+                             match.capturedLength()))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         [[nodiscard]] bool isInsidePhoneNumber(const QString& text, const qsizetype start,
@@ -269,6 +317,16 @@ namespace javelin::jmap::cache
                                       .arg(maskedCode(value)),
                 };
             }
+            if (isInsideTimeOfDay(body, start, length))
+            {
+                return ScoredCandidate{
+                    .action = {.kind = MessageAuthActionKind::CopyCode,
+                               .value = value,
+                               .score = -20},
+                    .diagnostic = QStringLiteral("code candidate %1 rejected: part of a time")
+                                      .arg(maskedCode(value)),
+                };
+            }
             if (isInsidePhoneNumber(body, start, length))
             {
                 return ScoredCandidate{
@@ -378,11 +436,15 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] bool hasStrongLinkText(const QString& text)
         {
-            return containsAny(text, {QStringView{u"sign in"}, QStringView{u"sign-in"},
-                                      QStringView{u"log in"}, QStringView{u"login"},
-                                      QStringView{u"verify"}, QStringView{u"confirm"},
-                                      QStringView{u"authenticate"}, QStringView{u"access account"},
-                                      QStringView{u"magic link"}});
+            return containsAnyWholeTerm(
+                text, {QStringView{u"sign in"}, QStringView{u"sign-in"}, QStringView{u"log in"},
+                       QStringView{u"login"}, QStringView{u"authenticate"},
+                       QStringView{u"access account"}, QStringView{u"magic link"}});
+        }
+
+        [[nodiscard]] bool hasAmbiguousAuthLinkText(const QString& text)
+        {
+            return containsAnyWholeTerm(text, {QStringView{u"verify"}, QStringView{u"confirm"}});
         }
 
         [[nodiscard]] bool hasWeakLinkText(const QString& text)
@@ -473,6 +535,12 @@ namespace javelin::jmap::cache
             {
                 score += 6;
                 reasons.push_back(QStringLiteral("+6 authentication link text"));
+            }
+            else if (hasAmbiguousAuthLinkText(anchorText))
+            {
+                score += 3;
+                reasons.push_back(
+                    QStringLiteral("+3 verify/confirm link text requiring corroboration"));
             }
             else if (hasWeakLinkText(anchorText))
             {
