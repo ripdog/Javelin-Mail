@@ -27,6 +27,7 @@
 #include <QAccessibleWidget>
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QFileIconProvider>
@@ -71,6 +72,7 @@ namespace javelin::gui::messageview
         constexpr std::string_view TranslationBannerId{"translation"};
         constexpr std::string_view JunkBannerId{"junk"};
         constexpr std::string_view UnsubscribeBannerId{"unsubscribe"};
+        constexpr std::string_view AuthActionBannerId{"auth-action"};
         constexpr auto AccessibleDocumentTextProperty = "_javelin_accessible_document_text";
 
         class MessageViewBanner final : public KMessageWidget
@@ -535,6 +537,28 @@ namespace javelin::gui::messageview
                     updateUnsubscribeBanner();
                 });
 
+        m_authActionBanner = makeBanner(KMessageWidget::Information,
+                                        QIcon::fromTheme(QStringLiteral("dialog-password")));
+        m_authActionBanner->setObjectName(QStringLiteral("messageAuthActionBanner"));
+        m_authActionBanner->setWordWrap(true);
+        m_authPrimaryAction = new QAction(this);
+        m_authPrimaryAction->setObjectName(QStringLiteral("messageAuthActionPrimary"));
+        m_authActionBanner->addAction(m_authPrimaryAction);
+        connect(m_authPrimaryAction, &QAction::triggered, this,
+                &MessageViewContainer::activateAuthAction);
+        m_authDebugAction = new QAction(i18nc("@action:button", "Copy details"), this);
+        m_authDebugAction->setObjectName(QStringLiteral("messageAuthActionDebug"));
+        m_authDebugAction->setToolTip(i18n("Copy authentication detection reasoning"));
+        m_authActionBanner->addAction(m_authDebugAction);
+        connect(m_authDebugAction, &QAction::triggered, this,
+                &MessageViewContainer::copyAuthActionDebug);
+        connect(m_authActionBanner, &KMessageWidget::hideAnimationFinished, this,
+                [this]
+                {
+                    dismissMessageBanner(AuthActionBannerId);
+                    updateAuthActionBanner();
+                });
+
         m_translationBanner =
             makeBanner(KMessageWidget::Information,
                        QIcon::fromTheme(QStringLiteral("preferences-desktop-locale")));
@@ -785,6 +809,7 @@ namespace javelin::gui::messageview
 
         layout->addWidget(headerWidget);
         layout->addWidget(m_remoteContentBanner);
+        layout->addWidget(m_authActionBanner);
         layout->addWidget(m_translationBanner);
         layout->addWidget(m_junkBanner);
         layout->addWidget(m_unsubscribeBanner);
@@ -1022,6 +1047,7 @@ namespace javelin::gui::messageview
         updateRemoteContentButton();
         updateJunkBanner();
         updateUnsubscribeBanner();
+        updateAuthActionBanner();
         updateLanguageBanner();
         updateAccessibleDocument();
     }
@@ -1223,6 +1249,73 @@ namespace javelin::gui::messageview
                      i18nc("@action:link", "Unsubscribe").toHtmlEscaped()));
     }
 
+    void MessageViewContainer::updateAuthActionBanner()
+    {
+        const auto* detection = m_snapshot.has_value() ? &m_snapshot->authActionDetection : nullptr;
+        const auto* action =
+            detection != nullptr && detection->action.has_value() ? &*detection->action : nullptr;
+
+        bool shouldShow = action != nullptr && !messageBannerDismissed(AuthActionBannerId);
+        QUrl actionUrl;
+        if (shouldShow && action->kind == javelin::jmap::cache::MessageAuthActionKind::OpenLink)
+        {
+            actionUrl = QUrl::fromEncoded(action->value.toUtf8());
+            shouldShow = messageLinkAction(actionUrl) != MessageLinkAction::Reject;
+        }
+
+        m_authActionBanner->setVisible(shouldShow);
+        if (!shouldShow)
+        {
+            m_authActionBanner->setText({});
+            m_authActionBanner->setToolTip({});
+            m_authPrimaryAction->setText({});
+            m_authPrimaryAction->setEnabled(false);
+            m_authDebugAction->setEnabled(false);
+            return;
+        }
+
+        m_authActionBanner->setToolTip(detection->debugSummary());
+        m_authPrimaryAction->setEnabled(true);
+        m_authDebugAction->setEnabled(true);
+
+        if (action->kind == javelin::jmap::cache::MessageAuthActionKind::CopyCode)
+        {
+            m_authActionBanner->setText(i18n("Authentication code detected: %1", action->value));
+            m_authPrimaryAction->setText(i18nc("@action:button", "Copy code"));
+            return;
+        }
+
+        m_authActionBanner->setText(
+            actionUrl.host().isEmpty()
+                ? i18n("Authentication link detected.")
+                : i18n("Authentication link detected for %1.", actionUrl.host()));
+        m_authPrimaryAction->setText(i18nc("@action:button", "Open link"));
+    }
+
+    void MessageViewContainer::activateAuthAction()
+    {
+        if (!m_snapshot.has_value() || !m_snapshot->authActionDetection.action.has_value())
+            return;
+
+        const auto& action = *m_snapshot->authActionDetection.action;
+        if (action.kind == javelin::jmap::cache::MessageAuthActionKind::CopyCode)
+        {
+            QApplication::clipboard()->setText(action.value, QClipboard::Clipboard);
+            return;
+        }
+
+        activateMessageLink(QUrl::fromEncoded(action.value.toUtf8()));
+    }
+
+    void MessageViewContainer::copyAuthActionDebug()
+    {
+        if (!m_snapshot.has_value())
+            return;
+
+        QApplication::clipboard()->setText(m_snapshot->authActionDetection.debugSummary(),
+                                           QClipboard::Clipboard);
+    }
+
     void MessageViewContainer::activateMessageLink(const QUrl& url)
     {
         // Plain-text linkification also creates telephone links. Keep their existing desktop
@@ -1365,6 +1458,7 @@ namespace javelin::gui::messageview
         updateRemoteContentButton();
         updateJunkBanner();
         updateUnsubscribeBanner();
+        updateAuthActionBanner();
         updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
         m_placeholderDetailLabel->setVisible(true);

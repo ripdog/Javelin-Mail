@@ -23,6 +23,8 @@ add_library(javelin_cache_read STATIC
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/AccountIdentity.h
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/EmailReadRepository.h
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageContentTypes.h
+    ${PROJECT_SOURCE_DIR}/src/storage/messages/MessageAuthActionDetector.cpp
+    ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageAuthActionDetector.h
     ${PROJECT_SOURCE_DIR}/src/storage/messages/MessageViewService.cpp
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageViewService.h
     ${PROJECT_SOURCE_DIR}/src/jmap/cache/MessageViewReader.h

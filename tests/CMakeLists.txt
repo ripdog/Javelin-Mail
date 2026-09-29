@@ -139,6 +139,7 @@ add_executable(javelin_storage_tests
     jmap/MailboxReadRepositoryTest.cpp
     jmap/MailboxRepositoryTest.cpp
     jmap/MailVaultTest.cpp
+    jmap/MessageAuthActionDetectorTest.cpp
     jmap/MessageViewServiceTest.cpp
     jmap/ReadOnlyCacheSurfaceTest.cpp
     jmap/SearchWindowRepositoryTest.cpp

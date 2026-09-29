@@ -215,6 +215,35 @@ TEST_CASE("message view service loads cached raw email bodies and attachments",
     CHECK(snapshot->attachments.front().isInlineRenderable);
 }
 
+TEST_CASE("message view service derives authentication actions from cached content",
+          "[jmap][cache][message-view][auth-action]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedEmail(databaseContext.connection);
+    seedMessageContent(databaseContext.connection,
+                       QByteArrayLiteral("Subject: Your verification code\r\n"
+                                         "Content-Type: text/plain; charset=utf-8\r\n"
+                                         "\r\n"
+                                         "Your verification code is 381942.\r\n"));
+
+    javelin::jmap::cache::MessageViewService service{databaseContext.connection};
+    const auto result = service.load("account-1", "eml-1");
+
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result));
+    const auto& snapshot =
+        std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result);
+    REQUIRE(snapshot.has_value());
+    REQUIRE(snapshot->authActionDetection.action.has_value());
+    CHECK(snapshot->authActionDetection.action->kind ==
+          javelin::jmap::cache::MessageAuthActionKind::CopyCode);
+    CHECK(snapshot->authActionDetection.action->value == QStringLiteral("381942"));
+}
+
 TEST_CASE("message view service supplies plain text for an email without a body",
           "[jmap][cache][message-view]")
 {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/cache/MessageAuthActionDetector.h"
 #include "jmap/domain/MailEntities.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
 #include "storage/DatabaseError.h"
@@ -48,6 +49,7 @@ namespace javelin::jmap::cache
         std::optional<MessageBody> plainTextBody;
         std::optional<MessageBody> htmlBody;
         std::optional<javelin::jmap::render::HtmlRenderDocument> htmlRenderDocument;
+        MessageAuthActionDetection authActionDetection;
         std::optional<std::string> unsubscribeUrl;
         std::vector<MessageAttachment> attachments;
     };

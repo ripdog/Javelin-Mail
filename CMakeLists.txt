@@ -366,6 +366,9 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/EmailReadRepository.h
     src/jmap/cache/IdentityReader.h
     src/jmap/cache/MessageContentTypes.h
+    src/storage/messages/MessageAuthActionDetector.cpp
+    src/jmap/cache/MessageAuthActionDetector.h
+    tests/jmap/MessageAuthActionDetectorTest.cpp
     src/storage/messages/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
     src/jmap/cache/MessageViewReader.h
