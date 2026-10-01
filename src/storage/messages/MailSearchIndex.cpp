@@ -7,6 +7,7 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QStringList>
 #include <QUuid>
 
 namespace javelin::jmap::cache
@@ -102,6 +103,72 @@ namespace javelin::jmap::cache
             return MailVault{
                 QDir(databaseInfo.absolutePath()).filePath(QStringLiteral("mail-vault/v1"))}
                 .searchIndexPath(accountId);
+        }
+
+        [[nodiscard]] bool isPhraseEscape(const QChar character)
+        {
+            return character == QLatin1Char('\'') || character == QLatin1Char('"') ||
+                   character == QLatin1Char('\\');
+        }
+
+        [[nodiscard]] std::optional<QString> searchMatchExpression(const std::string_view text)
+        {
+            const QString input = QString::fromStdString(std::string{text});
+            QStringList terms;
+            qsizetype position = 0;
+            while (position < input.size())
+            {
+                if (input.at(position).isSpace())
+                {
+                    ++position;
+                    continue;
+                }
+
+                QString term;
+                std::optional<qsizetype> phraseEnd;
+                const QChar delimiter = input.at(position);
+                if (delimiter == QLatin1Char('\'') || delimiter == QLatin1Char('"'))
+                {
+                    for (qsizetype end = position + 1; end < input.size(); ++end)
+                    {
+                        const QChar character = input.at(end);
+                        if (character == QLatin1Char('\\') && end + 1 < input.size() &&
+                            isPhraseEscape(input.at(end + 1)))
+                        {
+                            term += input.at(++end);
+                        }
+                        else if (character == delimiter)
+                        {
+                            phraseEnd = end + 1;
+                            break;
+                        }
+                        else
+                        {
+                            term += character;
+                        }
+                    }
+                }
+                if (phraseEnd)
+                {
+                    position = *phraseEnd;
+                }
+                else
+                {
+                    // Unmatched quotes remain literal text rather than FTS syntax.
+                    const qsizetype start = position;
+                    while (position < input.size() && !input.at(position).isSpace())
+                        ++position;
+                    term = input.mid(start, position - start);
+                }
+                if (!term.trimmed().isEmpty())
+                    terms.push_back(QStringLiteral("\"") +
+                                    term.replace(QLatin1String("\""), QStringLiteral("\"\"")) +
+                                    QLatin1Char('"'));
+            }
+            if (terms.isEmpty())
+                return std::nullopt;
+            // RFC 8621 4.4.1: separate unquoted words must all match the same Email.
+            return terms.join(QStringLiteral(" AND "));
         }
     } // namespace
 
@@ -281,18 +348,17 @@ namespace javelin::jmap::cache
     MailSearchIndex::search(const std::string_view accountId, const std::string_view text,
                             const std::size_t limit) const
     {
+        const auto match = searchMatchExpression(text);
+        if (!match || limit == 0)
+            return std::vector<std::string>{};
         IndexConnection connection{indexPath(m_cacheConnection, accountId), true};
         if (connection.failure())
             return *connection.failure();
-        QString match = QStringLiteral("\"");
-        match += QString::fromStdString(std::string{text})
-                     .replace(QLatin1String("\""), QStringLiteral("\"\""));
-        match += QLatin1Char('"');
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
             "SELECT d.email_id FROM email_search_fts f JOIN search_documents d ON d.rowid=f.rowid "
             "WHERE email_search_fts MATCH :match ORDER BY bm25(email_search_fts) LIMIT :limit"));
-        query.bindValue(QStringLiteral(":match"), match);
+        query.bindValue(QStringLiteral(":match"), *match);
         query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
         if (!query.exec())
             return error(QStringLiteral("Search local mail index"), query.lastError().text());
@@ -305,18 +371,17 @@ namespace javelin::jmap::cache
     std::variant<std::vector<std::string>, DatabaseError>
     MailSearchIndex::searchAll(const std::string_view accountId, const std::string_view text) const
     {
+        const auto match = searchMatchExpression(text);
+        if (!match)
+            return std::vector<std::string>{};
         IndexConnection connection{indexPath(m_cacheConnection, accountId), true};
         if (connection.failure())
             return *connection.failure();
-        QString match = QStringLiteral("\"");
-        match += QString::fromStdString(std::string{text})
-                     .replace(QLatin1String("\""), QStringLiteral("\"\""));
-        match += QLatin1Char('"');
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
             "SELECT d.email_id FROM email_search_fts f JOIN search_documents d ON d.rowid=f.rowid "
             "WHERE email_search_fts MATCH :match ORDER BY bm25(email_search_fts)"));
-        query.bindValue(QStringLiteral(":match"), match);
+        query.bindValue(QStringLiteral(":match"), *match);
         if (!query.exec())
             return error(QStringLiteral("Search complete local mail index"),
                          query.lastError().text());
@@ -330,18 +395,18 @@ namespace javelin::jmap::cache
     MailSearchIndex::searchAllBody(const std::string_view accountId,
                                    const std::string_view text) const
     {
+        const auto match = searchMatchExpression(text);
+        if (!match)
+            return std::vector<std::string>{};
         IndexConnection connection{indexPath(m_cacheConnection, accountId), true};
         if (connection.failure())
             return *connection.failure();
-        QString match = QStringLiteral("body : \"");
-        match += QString::fromStdString(std::string{text})
-                     .replace(QLatin1String("\""), QStringLiteral("\"\""));
-        match += QLatin1Char('"');
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral(
             "SELECT d.email_id FROM email_search_fts f JOIN search_documents d ON d.rowid=f.rowid "
             "WHERE email_search_fts MATCH :match ORDER BY bm25(email_search_fts)"));
-        query.bindValue(QStringLiteral(":match"), match);
+        const QString bodyMatch = QStringLiteral("body : (") + *match + QLatin1Char(')');
+        query.bindValue(QStringLiteral(":match"), bodyMatch);
         if (!query.exec())
             return error(QStringLiteral("Search complete local mail body index"),
                          query.lastError().text());

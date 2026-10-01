@@ -2,6 +2,7 @@
 #include "app/MailApplicationEventsPorts.h"
 #include "app/MessageListMaterializationPort.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/search/EmailSearch.h"
 #include "storage/sqlite/DatabaseConnection.h"
@@ -291,6 +292,54 @@ namespace
         };
     }
 } // namespace
+
+TEST_CASE("local search session finds words across indexed subject and body",
+          "[app][search-session][search][local]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-local-words-test"));
+    seedAccount(context.connection);
+    auto receipt = email("receipt", "2026-08-08T12:00:00Z");
+    receipt.subject = "Your tea order";
+    auto other = email("other", "2026-08-08T11:00:00Z");
+    other.subject = "Coffee order";
+    REQUIRE_FALSE(javelin::jmap::cache::EmailRepository{context.connection}
+                      .replaceAll("account-1", {receipt, other})
+                      .has_value());
+    javelin::jmap::cache::MailSearchIndex index{context.connection};
+    REQUIRE_FALSE(index
+                      .upsert("account-1", {.emailId = "receipt",
+                                            .sourceHash = "receipt-v1",
+                                            .subject = QStringLiteral("Your tea order"),
+                                            .body = QStringLiteral("Masala chai tea")})
+                      .has_value());
+    REQUIRE_FALSE(index
+                      .upsert("account-1", {.emailId = "other",
+                                            .sourceHash = "other-v1",
+                                            .subject = QStringLiteral("Coffee order"),
+                                            .body = QStringLiteral("Coffee beans")})
+                      .has_value());
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    {
+        javelin::app::SearchSession session{
+            "account-1", {.text = "chai order"}, {}, context.queries, materialization, events, 100};
+        session.loadCachedState();
+        waitFor([&] { return session.state().cacheLoaded; });
+        REQUIRE(session.state().items.size() == 1);
+        CHECK(session.state().items.front().emailId == "receipt");
+        CHECK(session.state().refreshError.isEmpty());
+        CHECK_FALSE(materialization.lastSearchIntent.has_value());
+    }
+    // A recreated session uses the same persisted index and honors explicit phrase syntax.
+    javelin::app::SearchSession phraseSession{
+        "account-1", {.text = R"("chai order")"}, {}, context.queries, materialization, events,
+        100};
+    phraseSession.loadCachedState();
+    waitFor([&] { return phraseSession.state().cacheLoaded; });
+    CHECK(phraseSession.state().items.empty());
+    CHECK(phraseSession.state().refreshError.isEmpty());
+}
 
 TEST_CASE("search session raises Thread expansion materialization priority",
           "[app][search-session][thread-coverage]")

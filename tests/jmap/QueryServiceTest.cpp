@@ -26,6 +26,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <variant>
 #include <vector>
@@ -624,6 +625,102 @@ TEST_CASE("mail search reader covers cached subjects and bodies", "[jmap][cache]
     REQUIRE(ascendingItems.size() == 2);
     CHECK(ascendingItems.at(0).emailId == "subject-match");
     CHECK(ascendingItems.at(1).emailId == "body-match");
+}
+
+TEST_CASE("local mail search separates words and preserves explicit phrases",
+          "[jmap][cache][query][search]")
+{
+    ApplicationGuard application;
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    {
+        javelin::jmap::cache::MailSearchIndex writer{databaseContext.connection};
+        const std::vector<javelin::jmap::cache::SearchIndexDocument> documents{
+            {.emailId = "cross-field",
+             .sourceHash = "1",
+             .subject = QStringLiteral("Chai tea"),
+             .body = QStringLiteral("Your order shipped.")},
+            {.emailId = "separated",
+             .sourceHash = "2",
+             .subject = QStringLiteral("Receipt"),
+             .body = QStringLiteral("Your order includes masala chai tea.")},
+            {.emailId = "phrase",
+             .sourceHash = "3",
+             .subject = QStringLiteral("Receipt"),
+             .body = QStringLiteral("Your chai order shipped.")},
+            {.emailId = "chai-only",
+             .sourceHash = "4",
+             .subject = QStringLiteral("Chai tea"),
+             .body = QStringLiteral("Enjoy your tea.")},
+            {.emailId = "order-only",
+             .sourceHash = "5",
+             .subject = QStringLiteral("Receipt"),
+             .body = QStringLiteral("Your coffee order shipped.")},
+            {.emailId = "literal-operator",
+             .sourceHash = "6",
+             .subject = {},
+             .body = QStringLiteral("Chai OR order")},
+            {.emailId = "escaped",
+             .sourceHash = "7",
+             .subject = {},
+             .body = QStringLiteral("Bob's chai order \\ receipt")},
+        };
+        for (const auto& document : documents)
+            REQUIRE_FALSE(writer.upsert("account-1", document).has_value());
+    }
+
+    // Reopen the persisted index through the GUI's read-only cache connection.
+    auto opened = javelin::jmap::cache::ReadOnlyDatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databaseContext.connection.database().databaseName(),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::ReadOnlyDatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::MailSearchIndex index{connection};
+    const auto check = [](const auto& result, std::vector<std::string> expected)
+    {
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+            FAIL(error->message.toStdString());
+        auto ids = std::get<std::vector<std::string>>(result);
+        std::ranges::sort(ids);
+        std::ranges::sort(expected);
+        CHECK(ids == expected);
+    };
+    const auto checkQuery = [&](const std::string_view text,
+                                const std::vector<std::string>& expected,
+                                const std::vector<std::string>& expectedBody)
+    {
+        INFO(text);
+        check(index.search("account-1", text, 20), expected);
+        check(index.searchAll("account-1", text), expected);
+        check(index.searchAllBody("account-1", text), expectedBody);
+    };
+    const std::vector<std::string> allMatches{"cross-field", "separated", "phrase",
+                                              "literal-operator", "escaped"};
+    const std::vector<std::string> bodyMatches{"separated", "phrase", "literal-operator",
+                                               "escaped"};
+    const std::vector<std::string> phraseMatches{"phrase", "escaped"};
+    checkQuery("chai order", allMatches, bodyMatches);
+    checkQuery("order chai", allMatches, bodyMatches);
+    checkQuery("  CHAI\t\norder  ", allMatches, bodyMatches);
+    checkQuery("chai\xc2\xa0order", allMatches, bodyMatches);
+    checkQuery(R"("chai order")", phraseMatches, phraseMatches);
+    checkQuery("'chai order'", phraseMatches, phraseMatches);
+    checkQuery(R"("chai order" shipped)", {"phrase"}, {"phrase"});
+    checkQuery(R"('Bob\'s chai' order)", {"escaped"}, {"escaped"});
+    checkQuery(R"("chai \"order\"")", phraseMatches, phraseMatches);
+    checkQuery(R"("order \\ receipt")", {"escaped"}, {"escaped"});
+    checkQuery("chai OR order", {"literal-operator"}, {"literal-operator"});
+    checkQuery("chai OR missing", {}, {});
+    checkQuery(R"(chai body:missing)", {}, {});
+    checkQuery("chai-order", phraseMatches, phraseMatches);
+    checkQuery("Bob's chai", {"escaped"}, {"escaped"});
+    checkQuery(R"("chai order)", allMatches, bodyMatches);
+    checkQuery("chai",
+               {"cross-field", "separated", "phrase", "literal-operator", "escaped", "chai-only"},
+               bodyMatches);
+    checkQuery("", {}, {});
+    checkQuery(" \t\n ", {}, {});
 }
 
 TEST_CASE("thread reader returns messages in cached thread order", "[jmap][cache][query]")

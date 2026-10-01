@@ -112,3 +112,11 @@ raw MIME source in memory at a time and commits the FTS/indexed-hash bookkeeping
 transactions. Search results are joined back to the main cache for current effective objects and are
 merged with JMAP search by the existing search session. Deleting the index is always safe; indexing
 rebuilds it from the vault.
+
+Local indexed text searches follow RFC 8621 section 4.4.1: unquoted whitespace-separated
+terms must all occur in the same Email, in any order and across its subject/body fields.
+Matched single or double quotes explicitly request a phrase; escaped quotes and backslashes
+inside phrases are decoded before querying FTS5. User text is always quoted as FTS literals,
+so FTS operators and column selectors cannot change the search scope. Body-only quick filters
+apply the same matching rules with every term restricted to the body field. These are query
+semantics over the existing index and do not require reindexing downloaded mail.
