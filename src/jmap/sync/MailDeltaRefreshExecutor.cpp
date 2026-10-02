@@ -38,6 +38,60 @@ namespace javelin::jmap::sync
         using javelin::jmap::api::MailboxChangesResponse;
         using javelin::jmap::api::MailboxGetResponse;
 
+        constexpr std::uint64_t notificationBodyPartBytes = 64 * 1024;
+        constexpr std::uint64_t notificationBodyPageSize = 32;
+        constexpr std::size_t notificationBodyTotalBytes = 128 * 1024;
+
+        [[nodiscard]] std::optional<javelin::jmap::api::EmailGetBodyOptions>
+        incomingBodyOptions(bool fetchBodies)
+        {
+            if (!fetchBodies)
+                return std::nullopt;
+            return javelin::jmap::api::EmailGetBodyOptions{
+                .bodyProperties = {"partId", "type"},
+                .fetchTextBodyValues = true,
+                .fetchHTMLBodyValues = false,
+                .fetchAllBodyValues = false,
+                .maxBodyValueBytes = notificationBodyPartBytes,
+            };
+        }
+
+        [[nodiscard]] std::optional<javelin::jmap::cache::MailNotificationBody>
+        notificationBody(const std::vector<javelin::jmap::api::EmailContent>& contents,
+                         std::string_view emailId)
+        {
+            const auto content =
+                std::ranges::find(contents, emailId, &javelin::jmap::api::EmailContent::id);
+            if (content == contents.end())
+                return std::nullopt;
+            javelin::jmap::cache::MailNotificationBody body;
+            for (const auto& part : content->textBody)
+            {
+                if (!part.partId)
+                    continue;
+                const auto value = content->bodyValues.find(*part.partId);
+                if (value == content->bodyValues.end() || value->second.isEncodingProblem ||
+                    value->second.isTruncated)
+                    continue;
+                const auto type = QString::fromStdString(part.type);
+                auto* text = type.compare(QStringLiteral("text/plain"), Qt::CaseInsensitive) == 0
+                                 ? &body.plainText
+                             : type.compare(QStringLiteral("text/html"), Qt::CaseInsensitive) == 0
+                                 ? &body.html
+                                 : nullptr;
+                if (text == nullptr || value->second.value.empty())
+                    continue;
+                if (value->second.value.size() + body.plainText.size() + body.html.size() + 1 >
+                    notificationBodyTotalBytes)
+                    break;
+                *text += value->second.value;
+                *text += '\n';
+            }
+            if (body.plainText.empty() && body.html.empty())
+                return std::nullopt;
+            return body;
+        }
+
         struct DeltaHandles
         {
             std::optional<CallHandle<MailboxChangesResponse>> mailboxChanges;
@@ -56,6 +110,7 @@ namespace javelin::jmap::sync
             bool mailboxNeedsFullRefresh = false;
             std::optional<EmailChangesResponse> emailChanges;
             std::vector<javelin::jmap::domain::Email> emails;
+            std::vector<javelin::jmap::api::EmailContent> bodyContents;
             std::vector<std::string> lateDestroyedEmails;
             bool emailNeedsContinuation = false;
             bool emailNeedsFullRefresh = false;
@@ -466,7 +521,8 @@ namespace javelin::jmap::sync
         [[nodiscard]] std::optional<OperationError>
         addEmailDeltaCalls(javelin::jmap::api::RequestBuilder& builder,
                            const std::string_view accountId, const std::string_view sinceState,
-                           const std::optional<std::uint64_t> maxChanges, DeltaHandles& handles)
+                           const std::optional<std::uint64_t> maxChanges, DeltaHandles& handles,
+                           bool fetchBodies)
         {
             const auto changes = javelin::jmap::api::emailChanges({
                 .accountId = std::string{accountId},
@@ -479,8 +535,10 @@ namespace javelin::jmap::sync
                 };
             handles.emailChanges = builder.call(*changes, "email-changes");
 
-            const auto created = javelin::jmap::api::emailGet(javelin::jmap::api::getRequestFrom(
-                std::string{accountId}, *handles.emailChanges, "/created"));
+            const auto created = javelin::jmap::api::emailGet(
+                javelin::jmap::api::getRequestFrom(std::string{accountId}, *handles.emailChanges,
+                                                   "/created"),
+                incomingBodyOptions(fetchBodies));
             if (!created.has_value())
                 return OperationError{
                     .message = QStringLiteral("Failed to encode delta Email/get."),
@@ -584,6 +642,7 @@ namespace javelin::jmap::sync
                         parsed.emailNeedsContinuation = createdAssessment.needsContinuation;
                         parsed.lateDestroyedEmails = createdAssessment.lateDestroyed;
                         parsed.emails = std::move(created.list);
+                        parsed.bodyContents = std::move(created.bodyContents);
                     }
                 }
             }
@@ -1005,6 +1064,16 @@ namespace javelin::jmap::sync
             emailFence = std::get<RefreshFence>(fence);
         }
 
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        const auto activeNotificationMailboxes = notificationMailboxIdsForTransition(
+            notifications, accountId, notificationBaselineMailboxIds);
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&activeNotificationMailboxes))
+            co_return operationError(*error);
+        const bool fetchBodies =
+            emailState.has_value() &&
+            !std::get<std::vector<std::string>>(activeNotificationMailboxes).empty();
+
         javelin::jmap::api::RequestBuilder builder;
         builder.useCore().useMail();
         DeltaHandles handles;
@@ -1012,6 +1081,10 @@ namespace javelin::jmap::sync
             m_apiRequestContext.requestLimits.has_value()
                 ? std::optional{m_apiRequestContext.requestLimits->maxObjectsInGet}
                 : std::nullopt;
+        const auto emailMaxChanges =
+            fetchBodies ? std::optional{std::min(maxChanges.value_or(notificationBodyPageSize),
+                                                 notificationBodyPageSize)}
+                        : maxChanges;
         if (mailboxState.has_value())
         {
             if (const auto error = addMailboxDeltaCalls(builder, remoteAccountId, *mailboxState,
@@ -1020,8 +1093,8 @@ namespace javelin::jmap::sync
         }
         if (emailState.has_value())
         {
-            if (const auto error =
-                    addEmailDeltaCalls(builder, remoteAccountId, *emailState, maxChanges, handles))
+            if (const auto error = addEmailDeltaCalls(builder, remoteAccountId, *emailState,
+                                                      emailMaxChanges, handles, fetchBodies))
                 co_return *error;
         }
 
@@ -1081,7 +1154,6 @@ namespace javelin::jmap::sync
         javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
         javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
         javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
-        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
         javelin::jmap::cache::SearchWindowRepository searchWindows{m_databaseConnection};
         javelin::jmap::sync::EmailMutationJournal emailMutations{m_databaseConnection};
         std::unordered_map<std::string, std::vector<std::string>> trackedMailboxIds;
@@ -1090,6 +1162,7 @@ namespace javelin::jmap::sync
         if (parsed.emailChanges.has_value() && !parsed.emailChanges->updated.empty())
         {
             std::vector<std::string> relevantUpdatedIds;
+            std::vector<std::string> updatedBodyIds;
             for (const auto& emailId : parsed.emailChanges->updated)
             {
                 const auto cachedResult = emails.find(accountId, emailId);
@@ -1125,24 +1198,50 @@ namespace javelin::jmap::sync
                     [](const auto& mutation) { return projectsOptimistically(mutation.status); });
                 if (cached || trackedByMailbox || trackedBySearch || mutationActive)
                     relevantUpdatedIds.push_back(emailId);
+                const auto& previous =
+                    std::get<std::optional<javelin::jmap::domain::Email>>(cachedResult);
+                if (fetchBodies && previous &&
+                    notificationMailboxIntersection(
+                        *previous, std::get<std::vector<std::string>>(activeNotificationMailboxes))
+                        .empty())
+                    updatedBodyIds.push_back(emailId);
             }
 
             if (!relevantUpdatedIds.empty())
             {
-                const auto updatedRequest = javelin::jmap::api::emailGet({
-                    .accountId = remoteAccountId,
-                    .ids = relevantUpdatedIds,
-                    .idsReference = std::nullopt,
-                    .properties = std::nullopt,
-                });
-                if (!updatedRequest.has_value())
-                    co_return OperationError{
-                        .message = QStringLiteral("Failed to encode relevant delta Email/get."),
-                    };
+                std::vector<std::string> metadataIds;
+                for (const auto& emailId : relevantUpdatedIds)
+                    if (std::ranges::find(updatedBodyIds, emailId) == updatedBodyIds.end())
+                        metadataIds.push_back(emailId);
+                struct UpdatedFetch
+                {
+                    std::vector<std::string> ids;
+                    CallHandle<EmailGetResponse> handle;
+                };
+                std::vector<UpdatedFetch> updatedFetches;
                 javelin::jmap::api::RequestBuilder updatedBuilder;
                 updatedBuilder.useCore().useMail();
-                const auto updatedHandle =
-                    updatedBuilder.call(*updatedRequest, "relevant-updated-emails");
+                for (const bool withBodies : {false, true})
+                {
+                    const auto& ids = withBodies ? updatedBodyIds : metadataIds;
+                    if (ids.empty())
+                        continue;
+                    const auto updatedRequest = javelin::jmap::api::emailGet(
+                        {
+                            .accountId = remoteAccountId,
+                            .ids = ids,
+                            .idsReference = std::nullopt,
+                            .properties = std::nullopt,
+                        },
+                        incomingBodyOptions(withBodies));
+                    if (!updatedRequest)
+                        co_return OperationError{
+                            .message = QStringLiteral("Failed to encode relevant delta Email/get."),
+                        };
+                    const auto callId = updatedFetches.empty() ? "relevant-updated-emails"
+                                                               : "relevant-updated-bodies";
+                    updatedFetches.push_back({ids, updatedBuilder.call(*updatedRequest, callId)});
+                }
                 const auto updatedEnvelope =
                     co_await m_methodCaller.call(m_apiRequestContext, updatedBuilder);
                 if (const auto* error =
@@ -1156,32 +1255,41 @@ namespace javelin::jmap::sync
                     co_return operationError(*error);
                 const javelin::jmap::api::ResponseReader updatedReader{
                     std::get<javelin::jmap::api::ResponseEnvelope>(updatedEnvelope)};
-                const auto updatedResult = updatedReader.require(updatedHandle);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::api::ResponseReaderError>(&updatedResult))
-                    co_return operationError(*error);
-                auto updated = std::get<EmailGetResponse>(updatedResult);
-                const auto assessment =
-                    assessMaterialization(relevantUpdatedIds, updated.list, updated.notFound,
-                                          parsed.emailChanges->newState, updated.state);
-                if (!assessment.complete || updated.accountId != remoteAccountId)
+                for (const auto& fetch : updatedFetches)
                 {
-                    summary.emailNeedsFullRefresh = true;
-                    parsed.emailChanges.reset();
-                    parsed.emails.clear();
-                    parsed.lateDestroyedEmails.clear();
-                    parsed.emailNeedsContinuation = false;
-                    trackedMailboxIds.clear();
-                    searchWindowsAffected = false;
-                }
-                else
-                {
-                    parsed.emailNeedsContinuation =
-                        parsed.emailNeedsContinuation || assessment.needsContinuation;
-                    appendUnique(parsed.lateDestroyedEmails, assessment.lateDestroyed);
-                    parsed.emails.insert(parsed.emails.end(),
-                                         std::make_move_iterator(updated.list.begin()),
-                                         std::make_move_iterator(updated.list.end()));
+                    const auto updatedResult = updatedReader.require(fetch.handle);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::api::ResponseReaderError>(&updatedResult))
+                        co_return operationError(*error);
+                    auto updated = std::get<EmailGetResponse>(updatedResult);
+                    const auto assessment =
+                        assessMaterialization(fetch.ids, updated.list, updated.notFound,
+                                              parsed.emailChanges->newState, updated.state);
+                    if (!assessment.complete || updated.accountId != remoteAccountId)
+                    {
+                        summary.emailNeedsFullRefresh = true;
+                        parsed.emailChanges.reset();
+                        parsed.emails.clear();
+                        parsed.bodyContents.clear();
+                        parsed.lateDestroyedEmails.clear();
+                        parsed.emailNeedsContinuation = false;
+                        trackedMailboxIds.clear();
+                        searchWindowsAffected = false;
+                        break;
+                    }
+                    else
+                    {
+                        parsed.emailNeedsContinuation =
+                            parsed.emailNeedsContinuation || assessment.needsContinuation;
+                        appendUnique(parsed.lateDestroyedEmails, assessment.lateDestroyed);
+                        parsed.bodyContents.insert(
+                            parsed.bodyContents.end(),
+                            std::make_move_iterator(updated.bodyContents.begin()),
+                            std::make_move_iterator(updated.bodyContents.end()));
+                        parsed.emails.insert(parsed.emails.end(),
+                                             std::make_move_iterator(updated.list.begin()),
+                                             std::make_move_iterator(updated.list.end()));
+                    }
                 }
             }
         }
@@ -1276,6 +1384,7 @@ namespace javelin::jmap::sync
                         .threadId = effectiveCurrent.threadId,
                         .subject = effectiveCurrent.subject,
                         .receivedAt = effectiveCurrent.receivedAt,
+                        .body = notificationBody(parsed.bodyContents, effectiveCurrent.id),
                     });
                 }
             }

@@ -231,3 +231,49 @@ TEST_CASE("authentication action detector rejects footer links", "[cache][messag
     CHECK(result.debugSummary().contains(QStringLiteral("negative link text")));
     CHECK_FALSE(result.debugSummary().contains(QStringLiteral("secret-value")));
 }
+
+TEST_CASE("authentication action detector prefers a valid code over a higher scoring link",
+          "[cache][message-auth-action]")
+{
+    MessageAuthActionDetector detector;
+    const auto result = detector.detect({
+        .subject = QStringLiteral("Sign in to your account"),
+        .plainText = QStringLiteral("Your sign in code is 123456. Use this code to log in."),
+        .html = QStringLiteral(
+            "<p>Sign in to your account.</p>"
+            "<a href=\"https://accounts.example.test/login?token=secret\">Sign in</a>"),
+    });
+    REQUIRE(result.action.has_value());
+    CHECK(result.action->kind == MessageAuthActionKind::CopyCode);
+    CHECK(result.action->value == QStringLiteral("123456"));
+}
+
+TEST_CASE("authentication action detector recognizes contextual plain-text links",
+          "[cache][message-auth-action]")
+{
+    MessageAuthActionDetector detector;
+    SECTION("sign in URL")
+    {
+        const auto result = detector.detect({
+            .subject = QStringLiteral("Sign in to your account"),
+            .plainText = QStringLiteral(
+                "Use this link to sign in:\nhttps://accounts.example.test/login?token=secret."),
+            .html = {},
+        });
+        REQUIRE(result.action.has_value());
+        CHECK(result.action->kind == MessageAuthActionKind::OpenLink);
+        CHECK(result.action->value ==
+              QStringLiteral("https://accounts.example.test/login?token=secret"));
+        CHECK_FALSE(result.debugSummary().contains(QStringLiteral("secret")));
+    }
+    SECTION("newsletter unsubscribe URL")
+    {
+        const auto result = detector.detect({
+            .subject = QStringLiteral("Monthly account update"),
+            .plainText =
+                QStringLiteral("Unsubscribe: https://example.test/preferences?token=secret"),
+            .html = {},
+        });
+        CHECK_FALSE(result.action.has_value());
+    }
+}

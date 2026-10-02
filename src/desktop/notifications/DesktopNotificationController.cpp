@@ -28,6 +28,8 @@ namespace javelin::app
         constexpr auto archiveActionKey = "archive";
         constexpr auto markReadActionKey = "mark-read";
         constexpr auto replyActionKey = "reply";
+        constexpr auto copyCodeActionKey = "copy-code";
+        constexpr auto openAuthLinkActionKey = "open-auth-link";
         constexpr auto notificationIconName = "mail-unread";
         constexpr auto nativeDesktopEntryName = "javelinmail";
         constexpr auto notificationApplicationName = "javelinmail";
@@ -68,6 +70,37 @@ namespace javelin::app
             if (sendId.isEmpty() || sendId.contains(QLatin1Char(':')))
                 return std::nullopt;
             return sendId;
+        }
+
+        [[nodiscard]] QStringList
+        newMailActions(const std::optional<MailNotificationAuthAction>& authAction)
+        {
+            QStringList actions{
+                QString::fromLatin1(defaultActionKey),
+                i18nc("@action:button desktop notification", "Open"),
+                QString::fromLatin1(archiveActionKey),
+                i18nc("@action:button desktop notification", "Archive"),
+                QString::fromLatin1(markReadActionKey),
+                i18nc("@action:button desktop notification", "Mark Read"),
+            };
+            if (!authAction.has_value())
+            {
+                actions.append({QString::fromLatin1(replyActionKey),
+                                i18nc("@action:button desktop notification", "Reply")});
+                return actions;
+            }
+
+            if (authAction->kind == MailNotificationAuthActionKind::CopyCode)
+            {
+                actions.append({QString::fromLatin1(copyCodeActionKey),
+                                i18nc("@action:button desktop notification", "Copy code")});
+            }
+            else
+            {
+                actions.append({QString::fromLatin1(openAuthLinkActionKey),
+                                i18nc("@action:button desktop notification", "Open link")});
+            }
+            return actions;
         }
 
         [[nodiscard]] DesktopNotificationCloseReason closeReason(const uint reason)
@@ -206,32 +239,20 @@ namespace javelin::app
 
     DesktopNotificationController::~DesktopNotificationController() = default;
 
-    bool DesktopNotificationController::notifyNewMail(const QString& accountId,
-                                                      const QString& mailboxId,
-                                                      const QString& threadId,
-                                                      const QString& emailId,
-                                                      const QString& mailboxName,
-                                                      const QString& title, const QString& message)
+    bool DesktopNotificationController::notifyNewMail(
+        const QString& accountId, const QString& mailboxId, const QString& threadId,
+        const QString& emailId, const QString& mailboxName, const QString& title,
+        const QString& message, std::optional<MailNotificationAuthAction> authAction)
     {
         const QString summary = mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
         QStringList actions;
         if (m_actionInvokedConnected && transportSupportsActions())
-        {
-            actions = {
-                QString::fromLatin1(defaultActionKey),
-                i18nc("@action:button desktop notification", "Open"),
-                QString::fromLatin1(archiveActionKey),
-                i18nc("@action:button desktop notification", "Archive"),
-                QString::fromLatin1(markReadActionKey),
-                i18nc("@action:button desktop notification", "Mark Read"),
-                QString::fromLatin1(replyActionKey),
-                i18nc("@action:button desktop notification", "Reply"),
-            };
-        }
+            actions = newMailActions(authAction);
         // Plasma requests one activation token for every action using the notification-wide
-        // desktop-entry hint. Archive and Mark Read are daemon-only, so associating this mixed
-        // action set with the GUI would leave startup feedback waiting for a window that will
-        // never open. Open and Reply still receive a usable token without an application id.
+        // desktop-entry hint. Archive, Mark Read, and authentication actions are daemon-only, so
+        // associating this mixed action set with the GUI would leave startup feedback waiting for a
+        // window that will never open. Open and Reply still receive a usable token without an
+        // application id.
         const auto sent = m_transport->send(
             QString::fromLatin1(notificationIconName), summary, message, actions,
             notificationHints(QString::fromLatin1(newMailEventId),
@@ -248,18 +269,20 @@ namespace javelin::app
         if (!delivery.notificationId.has_value())
             return true;
         const auto notificationId = *delivery.notificationId;
-        m_trackedNotifications.insert_or_assign(notificationId, TrackedNotification{
-                                                                    .accountId = accountId,
-                                                                    .mailboxId = mailboxId,
-                                                                    .mailboxName = mailboxName,
-                                                                    .threadId = threadId,
-                                                                    .emailId = emailId,
-                                                                    .activationToken = {},
-                                                                    .connectionId = {},
-                                                                    .calendarNotificationKey = {},
-                                                                    .sendId = {},
-                                                                    .opensSettings = false,
-                                                                });
+        m_trackedNotifications.insert_or_assign(notificationId,
+                                                TrackedNotification{
+                                                    .accountId = accountId,
+                                                    .mailboxId = mailboxId,
+                                                    .mailboxName = mailboxName,
+                                                    .threadId = threadId,
+                                                    .emailId = emailId,
+                                                    .authAction = std::move(authAction),
+                                                    .activationToken = {},
+                                                    .connectionId = {},
+                                                    .calendarNotificationKey = {},
+                                                    .sendId = {},
+                                                    .opensSettings = false,
+                                                });
         return true;
     }
 
@@ -267,7 +290,7 @@ namespace javelin::app
     {
         return notifyNewMail(notification.accountId, notification.mailboxId, notification.threadId,
                              notification.emailId, notification.mailboxName, notification.title,
-                             notification.message);
+                             notification.message, notification.authAction);
     }
 
     void DesktopNotificationController::notifyError(const QString& connectionId,
@@ -527,6 +550,30 @@ namespace javelin::app
             untrackNotification(notificationId);
             m_transport->close(notificationId);
             Q_EMIT mailMarkReadRequested(tracked.accountId, tracked.emailId);
+            return;
+        }
+        if (actionKey == QString::fromLatin1(copyCodeActionKey))
+        {
+            if (!tracked.authAction.has_value() ||
+                tracked.authAction->kind != MailNotificationAuthActionKind::CopyCode)
+            {
+                return;
+            }
+            untrackNotification(notificationId);
+            m_transport->close(notificationId);
+            Q_EMIT mailAuthCodeCopyRequested(tracked.authAction->value);
+            return;
+        }
+        if (actionKey == QString::fromLatin1(openAuthLinkActionKey))
+        {
+            if (!tracked.authAction.has_value() ||
+                tracked.authAction->kind != MailNotificationAuthActionKind::OpenLink)
+            {
+                return;
+            }
+            untrackNotification(notificationId);
+            m_transport->close(notificationId);
+            Q_EMIT mailAuthLinkOpenRequested(tracked.authAction->value, tracked.activationToken);
             return;
         }
         if (actionKey == QString::fromLatin1(replyActionKey))

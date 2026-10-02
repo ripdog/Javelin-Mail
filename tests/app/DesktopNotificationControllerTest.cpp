@@ -211,7 +211,9 @@ namespace
         std::function<void(uint)> closeObserver;
     };
 
-    void seedPendingMailNotification(javelin::app::DaemonServices& services)
+    void seedPendingMailNotification(
+        javelin::app::DaemonServices& services,
+        std::optional<javelin::jmap::cache::MailNotificationBody> body = std::nullopt)
     {
         auto& connection = services.databaseConnection();
         QSqlQuery account{connection.database()};
@@ -262,13 +264,13 @@ namespace
             std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
         auto transaction =
             std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
-        const auto created =
-            notifications.createEventIfUnconsumed(transaction, "account-1",
-                                                  {.mailboxId = "inbox",
-                                                   .emailId = email.id,
-                                                   .threadId = email.threadId,
-                                                   .subject = email.subject,
-                                                   .receivedAt = email.receivedAt});
+        const auto created = notifications.createEventIfUnconsumed(transaction, "account-1",
+                                                                   {.mailboxId = "inbox",
+                                                                    .emailId = email.id,
+                                                                    .threadId = email.threadId,
+                                                                    .subject = email.subject,
+                                                                    .receivedAt = email.receivedAt,
+                                                                    .body = std::move(body)});
         REQUIRE(std::holds_alternative<bool>(created));
         REQUIRE(std::get<bool>(created));
         REQUIRE_FALSE(transaction.commit().has_value());
@@ -461,7 +463,16 @@ TEST_CASE("daemon delivers pending new mail while no GUI is running",
     REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(location));
     javelin::app::DaemonServices services{
         std::get<javelin::app::CacheLocation>(std::move(location))};
-    seedPendingMailNotification(services);
+    std::optional<javelin::jmap::cache::MailNotificationBody> body;
+    SECTION("ordinary mail")
+    {
+    }
+    SECTION("authentication mail includes its code action on the first popup")
+    {
+        body = javelin::jmap::cache::MailNotificationBody{
+            .plainText = "Your sign in code is 123456. Use this code to log in.", .html = {}};
+    }
+    seedPendingMailNotification(services, body);
     CHECK(services.accountRuntimeManager().configuredAccountIds().empty());
 
     auto transport = std::make_unique<FakeNotificationTransport>();
@@ -475,6 +486,12 @@ TEST_CASE("daemon delivers pending new mail while no GUI is running",
 
     REQUIRE(observer->request.has_value());
     CHECK(observer->sendCount == 1);
+    if (body)
+    {
+        CHECK(observer->request->actions.contains(QStringLiteral("copy-code")));
+        CHECK_FALSE(observer->request->actions.contains(QStringLiteral("open-auth-link")));
+        CHECK_FALSE(observer->request->actions.contains(QStringLiteral("reply")));
+    }
     CHECK(observer->request->summary == QStringLiteral("New mail in Inbox"));
     CHECK(observer->request->message == QStringLiteral("Background notification"));
     CHECK(rowCount(services, QStringLiteral("mail_notification_event_outbox")) == 0);
@@ -1215,4 +1232,79 @@ TEST_CASE("notification replacement untracks before closing the old notification
     REQUIRE(instance.notifyUndoableSend(QStringLiteral("send-1"), QStringLiteral("Scheduled"),
                                         QStringLiteral("Subject"), 1'000));
     CHECK(ended == 0);
+}
+
+TEST_CASE("new mail authentication actions invoke the matching intent once",
+          "[app][daemon][notification][authentication][actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto transport = std::make_unique<FakeNotificationTransport>();
+    auto* observer = transport.get();
+    javelin::app::DesktopNotificationController controller{std::move(transport), false, true};
+    int copied = 0;
+    int opened = 0;
+    QString value;
+    QString token;
+    QObject::connect(&controller,
+                     &javelin::app::DesktopNotificationController::mailAuthCodeCopyRequested,
+                     &controller,
+                     [&](const QString& code)
+                     {
+                         ++copied;
+                         value = code;
+                     });
+    QObject::connect(&controller,
+                     &javelin::app::DesktopNotificationController::mailAuthLinkOpenRequested,
+                     &controller,
+                     [&](const QString& url, const QString& activationToken)
+                     {
+                         ++opened;
+                         value = url;
+                         token = activationToken;
+                     });
+    javelin::app::MailNotificationAuthAction action;
+    QString key;
+    QString otherKey;
+    SECTION("copy code")
+    {
+        action = {.kind = javelin::app::MailNotificationAuthActionKind::CopyCode,
+                  .value = QStringLiteral("123456")};
+        key = QStringLiteral("copy-code");
+        otherKey = QStringLiteral("open-auth-link");
+    }
+    SECTION("open link")
+    {
+        action = {.kind = javelin::app::MailNotificationAuthActionKind::OpenLink,
+                  .value = QStringLiteral("https://accounts.example.test/login?token=secret")};
+        key = QStringLiteral("open-auth-link");
+        otherKey = QStringLiteral("copy-code");
+    }
+    REQUIRE(controller.notifyNewMail(QStringLiteral("account"), QStringLiteral("inbox"),
+                                     QStringLiteral("thread"), QStringLiteral("email"),
+                                     QStringLiteral("Inbox"), QStringLiteral("New mail"),
+                                     QStringLiteral("Sign in"), action));
+    REQUIRE(observer->request.has_value());
+    CHECK(observer->sendCount == 1);
+    CHECK(observer->request->actions.contains(key));
+    CHECK_FALSE(observer->request->actions.contains(otherKey));
+    CHECK_FALSE(observer->request->actions.contains(QStringLiteral("reply")));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActivationToken", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId),
+                                      Q_ARG(QString, QStringLiteral("token"))));
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId),
+                                      Q_ARG(QString, otherKey)));
+    CHECK(copied + opened == 0);
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(QString, key)));
+    CHECK(copied + opened == 1);
+    CHECK(value == action.value);
+    if (opened)
+        CHECK(token == QStringLiteral("token"));
+    CHECK(observer->closedId == observer->notificationId);
+    REQUIRE(QMetaObject::invokeMethod(&controller, "onActionInvoked", Qt::DirectConnection,
+                                      Q_ARG(uint, observer->notificationId), Q_ARG(QString, key)));
+    CHECK(copied + opened == 1);
+    CHECK(observer->sendCount == 1);
 }

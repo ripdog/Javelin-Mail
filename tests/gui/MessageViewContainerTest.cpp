@@ -237,7 +237,10 @@ TEST_CASE("message view exposes detected authentication code as a banner action"
     auto* debug = view.findChild<QAction*>(QStringLiteral("messageAuthActionDebug"));
     REQUIRE(banner != nullptr);
     REQUIRE(primary != nullptr);
-    REQUIRE(debug != nullptr);
+    CHECK(debug == nullptr);
+    CHECK(banner->toolTip().isEmpty());
+    REQUIRE(banner->actions().size() == 1);
+    CHECK(banner->actions().front() == primary);
     CHECK(banner->isVisible());
     CHECK(banner->text().contains(QStringLiteral("381942")));
     CHECK(primary->text().contains(QStringLiteral("Copy"), Qt::CaseInsensitive));
@@ -245,10 +248,6 @@ TEST_CASE("message view exposes detected authentication code as a banner action"
     QApplication::clipboard()->clear();
     primary->trigger();
     CHECK(QApplication::clipboard()->text() == QStringLiteral("381942"));
-
-    debug->trigger();
-    CHECK(QApplication::clipboard()->text().contains(QStringLiteral("decision=copy-code")));
-    CHECK_FALSE(QApplication::clipboard()->text().contains(QStringLiteral("381942")));
 
     if (previousConfigHome.isNull())
     {

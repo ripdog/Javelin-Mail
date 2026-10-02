@@ -66,8 +66,9 @@ namespace javelin::gui::messages
         return plan;
     }
 
-    bool shouldActivateRestoredSelection(const bool selectionChanged, const bool quickFilterActive)
+    bool shouldActivateRestoredSelection(const bool selectionChanged, const bool quickFilterActive,
+                                         const bool messageNavigationActive)
     {
-        return selectionChanged && !quickFilterActive;
+        return selectionChanged && !quickFilterActive && !messageNavigationActive;
     }
 } // namespace javelin::gui::messages

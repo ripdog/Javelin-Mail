@@ -375,6 +375,7 @@ javelin_enable_sanitizers(javelin_incompatible_gui_helper)
 # exercise process composition and externally visible recovery behavior.
 add_executable(javelin_daemon_integration_tests
     app/DaemonProcessTest.cpp
+    app/DesktopAuthActionExecutorTest.cpp
     app/DesktopNotificationControllerTest.cpp
 )
 target_link_libraries(javelin_daemon_integration_tests

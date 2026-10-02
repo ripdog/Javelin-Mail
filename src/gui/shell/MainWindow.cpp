@@ -3010,8 +3010,10 @@ namespace javelin::gui::shell
             tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
         const bool quickFilterActive = mailbox != nullptr && mailbox->session != nullptr &&
                                        mailbox->session->quickFilterActive();
-        if (javelin::gui::messages::shouldActivateRestoredSelection(restoredSelectionChanged,
-                                                                    quickFilterActive))
+        const bool messageNavigationActive =
+            m_messageNavigationController->activeRoute(activeTab()) != nullptr;
+        if (javelin::gui::messages::shouldActivateRestoredSelection(
+                restoredSelectionChanged, quickFilterActive, messageNavigationActive))
             handleCurrentMessageChanged(m_messageView->currentIndex());
         else
             refreshSelectionFromModels();
@@ -3487,18 +3489,16 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto emailId = m_messageSelectionController->currentEmailId();
-        if (!emailId.has_value())
+        if (const auto* route = m_messageNavigationController->activeRoute(activeTab()))
         {
-            if (const auto* route = m_messageNavigationController->activeRoute(activeTab()))
-            {
-                setMessageViewSelection(route->accountId, route->mailboxId, route->emailId);
-                updateEmptyStates();
-                updateMessageListHeader();
-                m_mailActionController->update();
-                return;
-            }
+            setMessageViewSelection(route->accountId, route->mailboxId, route->emailId);
+            updateEmptyStates();
+            updateMessageListHeader();
+            m_mailActionController->update();
+            return;
         }
+
+        const auto emailId = m_messageSelectionController->currentEmailId();
         setMessageViewSelection(accountId, mailboxId, emailId);
         m_messageSelectionController->syncTabSelection(activeTab());
         updateEmptyStates();

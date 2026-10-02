@@ -546,12 +546,6 @@ namespace javelin::gui::messageview
         m_authActionBanner->addAction(m_authPrimaryAction);
         connect(m_authPrimaryAction, &QAction::triggered, this,
                 &MessageViewContainer::activateAuthAction);
-        m_authDebugAction = new QAction(i18nc("@action:button", "Copy details"), this);
-        m_authDebugAction->setObjectName(QStringLiteral("messageAuthActionDebug"));
-        m_authDebugAction->setToolTip(i18n("Copy authentication detection reasoning"));
-        m_authActionBanner->addAction(m_authDebugAction);
-        connect(m_authDebugAction, &QAction::triggered, this,
-                &MessageViewContainer::copyAuthActionDebug);
         connect(m_authActionBanner, &KMessageWidget::hideAnimationFinished, this,
                 [this]
                 {
@@ -1267,16 +1261,12 @@ namespace javelin::gui::messageview
         if (!shouldShow)
         {
             m_authActionBanner->setText({});
-            m_authActionBanner->setToolTip({});
             m_authPrimaryAction->setText({});
             m_authPrimaryAction->setEnabled(false);
-            m_authDebugAction->setEnabled(false);
             return;
         }
 
-        m_authActionBanner->setToolTip(detection->debugSummary());
         m_authPrimaryAction->setEnabled(true);
-        m_authDebugAction->setEnabled(true);
 
         if (action->kind == javelin::jmap::cache::MessageAuthActionKind::CopyCode)
         {
@@ -1305,15 +1295,6 @@ namespace javelin::gui::messageview
         }
 
         activateMessageLink(QUrl::fromEncoded(action.value.toUtf8()));
-    }
-
-    void MessageViewContainer::copyAuthActionDebug()
-    {
-        if (!m_snapshot.has_value())
-            return;
-
-        QApplication::clipboard()->setText(m_snapshot->authActionDetection.debugSummary(),
-                                           QClipboard::Clipboard);
     }
 
     void MessageViewContainer::activateMessageLink(const QUrl& url)

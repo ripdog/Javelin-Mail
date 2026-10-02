@@ -60,10 +60,11 @@ namespace javelin::app
                                       QObject* parent = nullptr);
         ~DesktopNotificationController() override;
 
-        [[nodiscard]] bool notifyNewMail(const QString& accountId, const QString& mailboxId,
-                                         const QString& threadId, const QString& emailId,
-                                         const QString& mailboxName, const QString& title,
-                                         const QString& message);
+        [[nodiscard]] bool
+        notifyNewMail(const QString& accountId, const QString& mailboxId, const QString& threadId,
+                      const QString& emailId, const QString& mailboxName, const QString& title,
+                      const QString& message,
+                      std::optional<MailNotificationAuthAction> authAction = std::nullopt);
         [[nodiscard]] bool deliverNewMail(const MailNotificationDelivery& notification) override;
         void notifyError(const QString& connectionId, const QString& title, const QString& message,
                          bool persistent, bool opensSettings);
@@ -90,6 +91,8 @@ namespace javelin::app
         void mailMarkReadRequested(const QString& accountId, const QString& emailId);
         void mailReplyRequested(const QString& accountId, const QString& emailId,
                                 const QString& activationToken);
+        void mailAuthCodeCopyRequested(const QString& code);
+        void mailAuthLinkOpenRequested(const QString& url, const QString& activationToken);
         void errorNotificationActivated(const QString& connectionId,
                                         const QString& activationToken);
         void calendarNotificationAction(const QString& key, bool snooze);
@@ -115,6 +118,7 @@ namespace javelin::app
             QString mailboxName = {};
             QString threadId = {};
             QString emailId = {};
+            std::optional<MailNotificationAuthAction> authAction = std::nullopt;
             QString activationToken = {};
             QString connectionId = {};
             QString calendarNotificationKey = {};

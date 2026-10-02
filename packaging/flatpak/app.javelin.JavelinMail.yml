@@ -21,6 +21,7 @@ finish-args:
   - --filesystem=xdg-config/javelinmail.notifyrc:ro
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.portal.Desktop
+  - --talk-name=org.kde.klipper
   - --talk-name=org.kde.StatusNotifierWatcher
   - --own-name=app.javelin.JavelinMail.StatusNotifierItem
   - --env=QTWEBENGINE_DISABLE_SANDBOX=1

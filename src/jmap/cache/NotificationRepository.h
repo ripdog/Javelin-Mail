@@ -11,6 +11,14 @@
 namespace javelin::jmap::cache
 {
 
+    struct MailNotificationBody
+    {
+        std::string plainText;
+        std::string html;
+
+        friend bool operator==(const MailNotificationBody&, const MailNotificationBody&) = default;
+    };
+
     struct MailNotificationEventInput
     {
         std::string mailboxId;
@@ -18,6 +26,7 @@ namespace javelin::jmap::cache
         std::string threadId;
         std::optional<std::string> subject;
         std::string receivedAt;
+        std::optional<MailNotificationBody> body = std::nullopt;
     };
 
     struct MailNotificationPendingEvent
@@ -28,6 +37,7 @@ namespace javelin::jmap::cache
         std::string threadId;
         std::optional<std::string> subject;
         std::string receivedAt;
+        std::optional<MailNotificationBody> body = std::nullopt;
     };
 
     class NotificationRepository

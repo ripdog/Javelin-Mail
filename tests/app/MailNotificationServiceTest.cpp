@@ -15,7 +15,9 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 #include <variant>
+#include <vector>
 
 namespace
 {
@@ -44,9 +46,11 @@ namespace
         {
             ++deliveryCount;
             lastDelivery = notification;
+            deliveries.push_back(notification);
             return acceptDelivery;
         }
 
+        std::vector<javelin::app::MailNotificationDelivery> deliveries;
         bool acceptDelivery = true;
         int deliveryCount = 0;
         javelin::app::MailNotificationDelivery lastDelivery;
@@ -98,7 +102,9 @@ namespace
         };
     }
 
-    void seedPendingNotification(javelin::jmap::cache::DatabaseConnection& connection)
+    void seedPendingNotification(
+        javelin::jmap::cache::DatabaseConnection& connection,
+        std::optional<javelin::jmap::cache::MailNotificationBody> body = std::nullopt)
     {
         QSqlQuery seed{connection.database()};
         REQUIRE(seed.exec(QStringLiteral(
@@ -120,13 +126,13 @@ namespace
             std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
         auto transaction =
             std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
-        const auto created =
-            notifications.createEventIfUnconsumed(transaction, "account-1",
-                                                  {.mailboxId = "inbox",
-                                                   .emailId = email.id,
-                                                   .threadId = email.threadId,
-                                                   .subject = email.subject,
-                                                   .receivedAt = email.receivedAt});
+        const auto created = notifications.createEventIfUnconsumed(transaction, "account-1",
+                                                                   {.mailboxId = "inbox",
+                                                                    .emailId = email.id,
+                                                                    .threadId = email.threadId,
+                                                                    .subject = email.subject,
+                                                                    .receivedAt = email.receivedAt,
+                                                                    .body = std::move(body)});
         REQUIRE(std::holds_alternative<bool>(created));
         REQUIRE(std::get<bool>(created));
         REQUIRE_FALSE(transaction.commit().has_value());
@@ -289,4 +295,124 @@ TEST_CASE("mail notification release failure retries before rearming delivery",
     CHECK(delivery.deliveryCount == 2);
     CHECK(rowCount(database.connection, QStringLiteral("mail_notification_event_outbox")) == 0);
     CHECK(rowCount(database.connection, QStringLiteral("notification_dispatch_claims")) == 0);
+}
+
+TEST_CASE("mail notification first delivery detects authentication from its durable body",
+          "[app][notification][mail][authentication]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    javelin::jmap::cache::MailNotificationBody body;
+    javelin::app::MailNotificationAuthActionKind expectedKind;
+    QString expectedValue;
+    SECTION("plain code")
+    {
+        body.plainText = "Your sign in code is 123456. Use this code to log in.";
+        expectedKind = javelin::app::MailNotificationAuthActionKind::CopyCode;
+        expectedValue = QStringLiteral("123456");
+    }
+    SECTION("plain authentication link")
+    {
+        body.plainText =
+            "Sign in to your account: https://accounts.example.test/login?token=secret";
+        expectedKind = javelin::app::MailNotificationAuthActionKind::OpenLink;
+        expectedValue = QStringLiteral("https://accounts.example.test/login?token=secret");
+    }
+    SECTION("HTML-only link")
+    {
+        body.html = "<p>Sign in to your account.</p>"
+                    "<a href=\"https://accounts.example.test/login?token=secret\">Sign in</a>";
+        expectedKind = javelin::app::MailNotificationAuthActionKind::OpenLink;
+        expectedValue = QStringLiteral("https://accounts.example.test/login?token=secret");
+    }
+    seedPendingNotification(database.connection, body);
+    javelin::app::MailNotificationService service{database.connection};
+    TestDeliveryPort delivery;
+    service.setDeliveryPort(&delivery);
+    service.accountChanged(QStringLiteral("account-1"));
+    REQUIRE(delivery.deliveryCount == 1);
+    REQUIRE(delivery.lastDelivery.authAction.has_value());
+    CHECK(delivery.lastDelivery.authAction->kind == expectedKind);
+    CHECK(delivery.lastDelivery.authAction->value == expectedValue);
+    CHECK(rowCount(database.connection, QStringLiteral("mail_notification_event_outbox")) == 0);
+    service.accountChanged(QStringLiteral("account-1"));
+    CHECK(delivery.deliveryCount == 1);
+}
+
+TEST_CASE("mail notification body survives failed delivery and a real cache reopen",
+          "[app][notification][mail][authentication][restart][retry]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedPendingNotification(
+        database.connection,
+        javelin::jmap::cache::MailNotificationBody{
+            .plainText = "Your login code is 654321. Use this code to sign in.", .html = {}});
+    {
+        javelin::app::MailNotificationService service{database.connection};
+        TestDeliveryPort delivery;
+        delivery.acceptDelivery = false;
+        service.setDeliveryPort(&delivery);
+        service.accountChanged(QStringLiteral("account-1"));
+        REQUIRE(delivery.lastDelivery.authAction.has_value());
+        CHECK(delivery.lastDelivery.authAction->value == QStringLiteral("654321"));
+        CHECK(rowCount(database.connection, QStringLiteral("mail_notification_event_outbox")) == 1);
+    }
+    database.connection = {};
+    auto reopened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("notification-body-reopen"),
+        .databasePath = database.directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(reopened));
+    database.connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(reopened));
+    javelin::app::MailNotificationService service{database.connection};
+    TestDeliveryPort delivery;
+    service.setDeliveryPort(&delivery);
+    REQUIRE_FALSE(service.recoverDispatches().has_value());
+    service.accountChanged(QStringLiteral("account-1"));
+    REQUIRE(delivery.deliveryCount == 1);
+    REQUIRE(delivery.lastDelivery.authAction.has_value());
+    CHECK(delivery.lastDelivery.authAction->value == QStringLiteral("654321"));
+}
+
+TEST_CASE("authentication mail keeps its action when ordinary mail arrives in the same batch",
+          "[app][notification][mail][authentication][grouping]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabase();
+    seedPendingNotification(
+        database.connection,
+        javelin::jmap::cache::MailNotificationBody{
+            .plainText = "Your login code is 123456. Use this code to sign in.", .html = {}});
+    auto email = pendingEmail();
+    email.id = "ordinary-1";
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email}).has_value());
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    auto begun = javelin::jmap::cache::DatabaseTransaction::begin(
+        database.connection, QStringLiteral("Seed ordinary notification"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(begun));
+    auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(begun));
+    const auto created = notifications.createEventIfUnconsumed(transaction, "account-1",
+                                                               {
+                                                                   .mailboxId = "inbox",
+                                                                   .emailId = email.id,
+                                                                   .threadId = email.threadId,
+                                                                   .subject = email.subject,
+                                                                   .receivedAt = email.receivedAt,
+                                                               });
+    REQUIRE(std::holds_alternative<bool>(created));
+    REQUIRE_FALSE(transaction.commit().has_value());
+    javelin::app::MailNotificationService service{database.connection};
+    TestDeliveryPort delivery;
+    service.setDeliveryPort(&delivery);
+    service.accountChanged(QStringLiteral("account-1"));
+    REQUIRE(delivery.deliveries.size() == 2);
+    CHECK(delivery.deliveries[0].emailId == QStringLiteral("email-1"));
+    REQUIRE(delivery.deliveries[0].authAction.has_value());
+    CHECK(delivery.deliveries[0].authAction->value == QStringLiteral("123456"));
+    CHECK_FALSE(delivery.deliveries[1].authAction.has_value());
 }

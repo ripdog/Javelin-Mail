@@ -15,6 +15,19 @@ namespace
         std::optional<std::vector<std::string>> properties;
     };
 
+    struct RawEmailGetRequest
+    {
+        std::string accountId;
+        std::optional<std::vector<std::string>> ids;
+        std::optional<javelin::jmap::api::GetRequest::ResultReference> idsReference;
+        std::optional<std::vector<std::string>> properties;
+        std::optional<std::vector<std::string>> bodyProperties;
+        std::optional<bool> fetchTextBodyValues;
+        std::optional<bool> fetchHTMLBodyValues;
+        std::optional<bool> fetchAllBodyValues;
+        std::optional<std::uint64_t> maxBodyValueBytes;
+    };
+
     struct RawMailboxGetResponse
     {
         std::string accountId;
@@ -590,6 +603,16 @@ template <> struct glz::meta<RawIdentitySetResponse>
         "accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState, "created",
         &T::created, "updated", &T::updated, "destroyed", &T::destroyed, "notCreated",
         &T::notCreated, "notUpdated", &T::notUpdated, "notDestroyed", &T::notDestroyed);
+};
+
+template <> struct glz::meta<RawEmailGetRequest>
+{
+    using T = RawEmailGetRequest;
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "ids", &T::ids, "#ids", &T::idsReference, "properties",
+        &T::properties, "bodyProperties", &T::bodyProperties, "fetchTextBodyValues",
+        &T::fetchTextBodyValues, "fetchHTMLBodyValues", &T::fetchHTMLBodyValues,
+        "fetchAllBodyValues", &T::fetchAllBodyValues, "maxBodyValueBytes", &T::maxBodyValueBytes);
 };
 
 template <> struct glz::meta<RawEmailGetResponse>
@@ -1688,9 +1711,22 @@ namespace javelin::jmap::api
             };
         }
 
-        const auto list = convertEntities<javelin::jmap::domain::Email>(
-            parsed.value->list, [](const std::string& entityJson)
-            { return javelin::jmap::domain::parseEmail(entityJson); });
+        std::vector<EmailContent> bodyContents;
+        auto list = convertEntities<javelin::jmap::domain::Email>(
+            parsed.value->list,
+            [&bodyContents](const std::string& entityJson)
+            {
+                auto email = javelin::jmap::domain::parseEmail(entityJson);
+                if (!email.ok())
+                    return email;
+                const auto content = parseMethod<RawEmailContent>(entityJson);
+                if (!content.ok())
+                    return javelin::jmap::domain::ParsedObject<javelin::jmap::domain::Email>{
+                        .value = std::nullopt, .error = content.error};
+                if (!content.value->textBody.empty())
+                    bodyContents.push_back(convertEmailContent(*content.value));
+                return email;
+            });
         if (!list.ok())
         {
             return {
@@ -1706,6 +1742,7 @@ namespace javelin::jmap::api
                     .state = std::move(parsed.value->state),
                     .list = std::move(*list.value),
                     .notFound = std::move(parsed.value->notFound),
+                    .bodyContents = std::move(bodyContents),
                 },
             .error = std::nullopt,
         };
@@ -2158,9 +2195,24 @@ namespace javelin::jmap::api
         };
     }
 
-    std::optional<MethodRequest<EmailGetResponse>> emailGet(const GetRequest& request)
+    std::optional<MethodRequest<EmailGetResponse>>
+    emailGet(const GetRequest& request, std::optional<EmailGetBodyOptions> bodyOptions)
     {
-        const auto arguments = serializeGetRequest(request);
+        const auto arguments = serializeMethod(RawEmailGetRequest{
+            .accountId = request.accountId,
+            .ids = request.ids,
+            .idsReference = request.idsReference,
+            .properties = request.properties,
+            .bodyProperties =
+                bodyOptions ? std::optional{bodyOptions->bodyProperties} : std::nullopt,
+            .fetchTextBodyValues =
+                bodyOptions ? std::optional{bodyOptions->fetchTextBodyValues} : std::nullopt,
+            .fetchHTMLBodyValues =
+                bodyOptions ? std::optional{bodyOptions->fetchHTMLBodyValues} : std::nullopt,
+            .fetchAllBodyValues =
+                bodyOptions ? std::optional{bodyOptions->fetchAllBodyValues} : std::nullopt,
+            .maxBodyValueBytes = bodyOptions ? bodyOptions->maxBodyValueBytes : std::nullopt,
+        });
         if (!arguments.has_value())
         {
             return std::nullopt;

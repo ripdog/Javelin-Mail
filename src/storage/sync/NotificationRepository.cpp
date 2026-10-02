@@ -56,10 +56,11 @@ namespace javelin::jmap::cache
             return false;
 
         QSqlQuery enqueue{m_connection.database()};
-        enqueue.prepare(
-            QStringLiteral("INSERT INTO mail_notification_event_outbox "
-                           "(account_id,email_id,mailbox_id,thread_id,subject,received_at) VALUES "
-                           "(:account_id,:email_id,:mailbox_id,:thread_id,:subject,:received_at)"));
+        enqueue.prepare(QStringLiteral("INSERT INTO mail_notification_event_outbox "
+                                       "(account_id,email_id,mailbox_id,thread_id,subject,received_"
+                                       "at,body_plain_text,body_html) VALUES "
+                                       "(:account_id,:email_id,:mailbox_id,:thread_id,:subject,:"
+                                       "received_at,:body_plain_text,:body_html)"));
         enqueue.bindValue(QStringLiteral(":account_id"),
                           QString::fromStdString(std::string{accountId}));
         enqueue.bindValue(QStringLiteral(":email_id"), QString::fromStdString(event.emailId));
@@ -70,6 +71,12 @@ namespace javelin::jmap::cache
         else
             enqueue.bindValue(QStringLiteral(":subject"), QVariant{});
         enqueue.bindValue(QStringLiteral(":received_at"), QString::fromStdString(event.receivedAt));
+        enqueue.bindValue(QStringLiteral(":body_plain_text"),
+                          event.body ? QVariant{QString::fromStdString(event.body->plainText)}
+                                     : QVariant{});
+        enqueue.bindValue(QStringLiteral(":body_html"),
+                          event.body ? QVariant{QString::fromStdString(event.body->html)}
+                                     : QVariant{});
         if (!enqueue.exec())
             return queryError(QStringLiteral("Queue mail notification delivery"), enqueue);
         return true;
@@ -79,10 +86,11 @@ namespace javelin::jmap::cache
     NotificationRepository::listPendingEvents(const std::string_view accountId) const
     {
         QSqlQuery query{m_connection.database()};
-        query.prepare(
-            QStringLiteral("SELECT mailbox_id,email_id,thread_id,subject,received_at FROM "
-                           "mail_notification_event_outbox WHERE account_id=:account_id ORDER BY "
-                           "created_at,email_id"));
+        query.prepare(QStringLiteral(
+            "SELECT mailbox_id,email_id,thread_id,subject,received_at,body_plain_text,body_html "
+            "FROM "
+            "mail_notification_event_outbox WHERE account_id=:account_id ORDER BY "
+            "created_at,email_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())
@@ -100,6 +108,11 @@ namespace javelin::jmap::cache
                                ? std::nullopt
                                : std::optional{query.value(3).toString().toStdString()},
                 .receivedAt = query.value(4).toString().toStdString(),
+                .body = (query.value(5).isNull() && query.value(6).isNull())
+                            ? std::nullopt
+                            : std::optional{MailNotificationBody{
+                                  .plainText = query.value(5).toString().toStdString(),
+                                  .html = query.value(6).toString().toStdString()}},
             });
         }
         return events;
@@ -268,7 +281,8 @@ namespace javelin::jmap::cache
             "ORDER BY CASE WHEN membership.mailbox_id=event.mailbox_id THEN 0 WHEN "
             "mailbox.role='inbox' THEN 1 ELSE 2 END,membership.mailbox_id LIMIT 1),"
             "EXISTS(SELECT 1 FROM email_keywords keyword WHERE keyword.account_id=event.account_id "
-            "AND keyword.email_id=event.email_id AND keyword.keyword='$seen') "
+            "AND keyword.email_id=event.email_id AND "
+            "keyword.keyword='$seen'),event.body_plain_text,event.body_html "
             "FROM mail_notification_event_outbox event WHERE event.account_id=:account_id "
             "ORDER BY event.mailbox_id,event.created_at,event.email_id"));
         pending.bindValue(QStringLiteral(":account_id"),
@@ -296,6 +310,11 @@ namespace javelin::jmap::cache
                                        ? std::nullopt
                                        : std::optional{pending.value(3).toString().toStdString()},
                         .receivedAt = pending.value(4).toString().toStdString(),
+                        .body = (pending.value(7).isNull() && pending.value(8).isNull())
+                                    ? std::nullopt
+                                    : std::optional{MailNotificationBody{
+                                          .plainText = pending.value(7).toString().toStdString(),
+                                          .html = pending.value(8).toString().toStdString()}},
                     },
                 .eligibleMailboxId = pending.value(5).isNull()
                                          ? std::nullopt

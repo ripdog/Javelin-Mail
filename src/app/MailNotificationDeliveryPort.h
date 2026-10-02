@@ -2,8 +2,25 @@
 
 #include <QString>
 
+#include <optional>
+
 namespace javelin::app
 {
+    enum class MailNotificationAuthActionKind
+    {
+        CopyCode,
+        OpenLink,
+    };
+
+    struct MailNotificationAuthAction
+    {
+        MailNotificationAuthActionKind kind = MailNotificationAuthActionKind::CopyCode;
+        QString value;
+
+        friend bool operator==(const MailNotificationAuthAction&,
+                               const MailNotificationAuthAction&) = default;
+    };
+
     struct MailNotificationDelivery
     {
         QString accountId;
@@ -13,6 +30,7 @@ namespace javelin::app
         QString mailboxName;
         QString title;
         QString message;
+        std::optional<MailNotificationAuthAction> authAction = std::nullopt;
     };
 
     class MailNotificationDeliveryPort

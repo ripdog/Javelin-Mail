@@ -6,13 +6,10 @@
 #include "jmap/cache/RawMessageSourceReadRepository.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
 
-#include <QLoggingCategory>
 #include <QtConcurrentRun>
 
 namespace javelin::jmap::cache
 {
-    Q_LOGGING_CATEGORY(logMessageAuthAction, "mail.auth-action", QtInfoMsg)
-
     MessageViewService::MessageViewService(DatabaseConnection& connection)
         : m_connection(connection)
     {
@@ -89,10 +86,6 @@ namespace javelin::jmap::cache
             snapshot.htmlRenderDocument =
                 builder.build(accountId, emailId, snapshot.htmlBody->value, parsed.renderParts);
         }
-
-        qCDebug(logMessageAuthAction).noquote()
-            << "emailId=" << QString::fromStdString(std::string{emailId}) << '\n'
-            << snapshot.authActionDetection.debugSummary();
 
         return std::optional<MessageViewSnapshot>{std::move(snapshot)};
     }

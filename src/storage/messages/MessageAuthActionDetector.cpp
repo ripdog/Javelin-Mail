@@ -652,7 +652,8 @@ namespace javelin::jmap::cache
         if (bodyTruncated)
             result.diagnostics.push_back(QStringLiteral("body-truncated=true"));
 
-        std::optional<MessageAuthAction> best;
+        std::optional<MessageAuthAction> bestCode;
+        std::optional<MessageAuthAction> bestLink;
         int codeCandidates = 0;
         int linkCandidates = 0;
 
@@ -667,7 +668,7 @@ namespace javelin::jmap::cache
                 continue;
             ++codeCandidates;
             result.diagnostics.push_back(candidate->diagnostic);
-            considerCandidate(*candidate, CodeThreshold, best);
+            considerCandidate(*candidate, CodeThreshold, bestCode);
         }
 
         if (!input.html.isEmpty())
@@ -686,11 +687,37 @@ namespace javelin::jmap::cache
                     continue;
                 ++linkCandidates;
                 result.diagnostics.push_back(candidate->diagnostic);
-                considerCandidate(*candidate, LinkThreshold, best);
+                considerCandidate(*candidate, LinkThreshold, bestLink);
             }
         }
 
-        result.action = std::move(best);
+        // Plain-first JMAP bodies can contain a usable URL without an HTML alternative.
+        static const QRegularExpression urlPattern{QStringLiteral(R"(https?://[^\s<>"']+)"),
+                                                   QRegularExpression::CaseInsensitiveOption};
+        static const QRegularExpression plainAnchorPattern{
+            QStringLiteral(R"(<a\b([^>]*)>(.*?)</a\s*>)"),
+            QRegularExpression::DotMatchesEverythingOption};
+        const auto plainText = clipped(normalizedText(input.plainText), MaximumBodyCharacters);
+        auto urls = urlPattern.globalMatch(plainText);
+        while (urls.hasNext())
+        {
+            const auto match = urls.next();
+            auto url = match.captured();
+            while (!url.isEmpty() && QStringView{u".,;!)]}"}.contains(url.back()))
+                url.chop(1);
+            const auto context =
+                contextAround(plainText, match.capturedStart(), match.capturedLength(), 240);
+            const auto html = context.toHtmlEscaped() +
+                              QStringLiteral("<a href=\"%1\">%1</a>").arg(url.toHtmlEscaped());
+            const auto candidate = scoreLink(html, subject, plainAnchorPattern.match(html));
+            if (!candidate)
+                continue;
+            ++linkCandidates;
+            result.diagnostics.push_back(candidate->diagnostic);
+            considerCandidate(*candidate, LinkThreshold, bestLink);
+        }
+
+        result.action = bestCode ? std::move(bestCode) : std::move(bestLink);
         result.diagnostics.push_front(QStringLiteral("candidates: codes=%1 links=%2")
                                           .arg(codeCandidates)
                                           .arg(linkCandidates));

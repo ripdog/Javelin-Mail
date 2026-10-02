@@ -3,6 +3,7 @@
 #include "app/MailNotificationDeliveryPort.h"
 #include "app/MessageSubject.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MessageAuthActionDetector.h"
 #include "jmap/cache/NotificationRepository.h"
 
 #include <KLocalizedString>
@@ -21,6 +22,27 @@ namespace javelin::app
     {
         constexpr unsigned int mailNotificationLocalRetryMaximumExponent = 5;
         constexpr auto mailNotificationDeliveryRetryDelay = std::chrono::seconds{60};
+        [[nodiscard]] std::optional<MailNotificationAuthAction>
+        notificationAuthAction(const javelin::jmap::cache::MailNotificationPendingEvent& event)
+        {
+            if (!event.body)
+                return std::nullopt;
+            const auto detection = javelin::jmap::cache::MessageAuthActionDetector{}.detect({
+                .subject = event.subject ? QString::fromStdString(*event.subject) : QString{},
+                .plainText = QString::fromStdString(event.body->plainText),
+                .html = QString::fromStdString(event.body->html),
+            });
+            if (!detection.action)
+                return std::nullopt;
+            return MailNotificationAuthAction{
+                .kind =
+                    detection.action->kind == javelin::jmap::cache::MessageAuthActionKind::CopyCode
+                        ? MailNotificationAuthActionKind::CopyCode
+                        : MailNotificationAuthActionKind::OpenLink,
+                .value = detection.action->value,
+            };
+        }
+
     } // namespace
 
     MailNotificationService::MailNotificationService(
@@ -72,15 +94,31 @@ namespace javelin::app
         if (pending.empty())
             return;
 
+        struct PendingDelivery
+        {
+            std::string mailboxId;
+            std::vector<const javelin::jmap::cache::MailNotificationPendingEvent*> events;
+            std::optional<MailNotificationAuthAction> authAction;
+        };
         std::map<std::string,
                  std::vector<const javelin::jmap::cache::MailNotificationPendingEvent*>>
             byMailbox;
+        std::vector<PendingDelivery> deliveries;
         for (const auto& event : pending)
-            byMailbox[event.mailboxId].push_back(&event);
+        {
+            if (auto action = notificationAuthAction(event))
+                deliveries.push_back({event.mailboxId, {&event}, std::move(action)});
+            else
+                byMailbox[event.mailboxId].push_back(&event);
+        }
+        for (auto& [mailboxId, events] : byMailbox)
+            deliveries.push_back({mailboxId, std::move(events), std::nullopt});
 
         javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
-        for (const auto& [mailboxId, events] : byMailbox)
+        for (const auto& pendingDelivery : deliveries)
         {
+            const auto& mailboxId = pendingDelivery.mailboxId;
+            const auto& events = pendingDelivery.events;
             QString mailboxName = QString::fromStdString(mailboxId);
             const auto mailboxResult = mailboxes.find(accountId.toStdString(), mailboxId);
             if (const auto* error =
@@ -114,6 +152,7 @@ namespace javelin::app
                 .mailboxName = mailboxName,
                 .title = title,
                 .message = message,
+                .authAction = pendingDelivery.authAction,
             };
             if (m_deliveryPort->deliverNewMail(delivery))
             {

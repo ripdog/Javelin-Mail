@@ -127,7 +127,6 @@ namespace javelin::gui::messageview
         void permitRemoteContentForCurrentSender();
         void permitRemoteContentForCurrentDomain();
         void activateAuthAction();
-        void copyAuthActionDebug();
         [[nodiscard]] QString currentSenderAddress() const;
         [[nodiscard]] QString currentSenderDomain() const;
         [[nodiscard]] QString contactAwareSenderLabel() const;
@@ -164,7 +163,6 @@ namespace javelin::gui::messageview
         KMessageWidget* m_translationBanner = nullptr;
         QAction* m_notJunkAction = nullptr;
         QAction* m_authPrimaryAction = nullptr;
-        QAction* m_authDebugAction = nullptr;
         QAction* m_translateAction = nullptr;
         QAction* m_translateOptionsAction = nullptr;
         QMenu* m_translateOptionsMenu = nullptr;

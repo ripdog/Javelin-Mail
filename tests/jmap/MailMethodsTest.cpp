@@ -921,3 +921,50 @@ TEST_CASE("email import responses preserve alreadyExists existingId", "[jmap][me
     CHECK(result.value->notCreated.at("import-1").existingId ==
           std::optional<std::string>{"eml-existing"});
 }
+
+TEST_CASE("email get requests fetch bounded plain-first bodies with chained ids",
+          "[jmap][method][mail][notification]")
+{
+    const auto request = javelin::jmap::api::emailGet(
+        {
+            .accountId = "u1",
+            .ids = std::nullopt,
+            .idsReference =
+                javelin::jmap::api::GetRequest::ResultReference{
+                    .resultOf = "email-changes", .name = "Email/changes", .path = "/created"},
+            .properties = std::nullopt,
+        },
+        javelin::jmap::api::EmailGetBodyOptions{
+            .bodyProperties = {"partId", "type"},
+            .fetchTextBodyValues = true,
+            .fetchHTMLBodyValues = false,
+            .fetchAllBodyValues = false,
+            .maxBodyValueBytes = 65536,
+        });
+    REQUIRE(request.has_value());
+    CHECK(
+        request->arguments ==
+        R"({"accountId":"u1","#ids":{"resultOf":"email-changes","name":"Email/changes","path":"/created"},"bodyProperties":["partId","type"],"fetchTextBodyValues":true,"fetchHTMLBodyValues":false,"fetchAllBodyValues":false,"maxBodyValueBytes":65536})");
+}
+
+TEST_CASE("email get parses metadata and the selected body including content validity flags",
+          "[jmap][method][mail][notification]")
+{
+    const auto response = javelin::jmap::api::parseEmailGetResponse(R"({
+        "accountId":"u1","state":"s1","list":[{
+            "id":"e1","blobId":"b1","threadId":"t1","mailboxIds":{"inbox":true},
+            "keywords":{},"size":99,"receivedAt":"2026-10-01T00:00:00Z",
+            "subject":"Sign in","textBody":[{"partId":"1","type":"text/html"}],
+            "bodyValues":{"1":{"value":"<p>Login code: 123456</p>","isTruncated":true,"isEncodingProblem":false}}
+        }],"notFound":[]})");
+    REQUIRE(response.ok());
+    REQUIRE(response.value->list.size() == 1);
+    CHECK(response.value->list.front().subject == std::optional<std::string>{"Sign in"});
+    REQUIRE(response.value->bodyContents.size() == 1);
+    const auto& body = response.value->bodyContents.front();
+    REQUIRE(body.textBody.size() == 1);
+    CHECK(body.textBody.front().type == "text/html");
+    CHECK(body.bodyValues.at("1").isTruncated);
+    CHECK_FALSE(body.bodyValues.at("1").isEncodingProblem);
+    CHECK(body.bodyValues.at("1").value == "<p>Login code: 123456</p>");
+}

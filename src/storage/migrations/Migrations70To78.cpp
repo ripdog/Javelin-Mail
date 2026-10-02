@@ -164,6 +164,17 @@ namespace javelin::jmap::cache::migrations
                             "updated_at=CURRENT_TIMESTAMP; END"),
                     },
             },
+            MigrationStep{
+                .version = 76,
+                .name = QStringLiteral("mail_notification_body_projection"),
+                .statements =
+                    {
+                        QStringLiteral("ALTER TABLE mail_notification_event_outbox ADD COLUMN "
+                                       "body_plain_text TEXT"),
+                        QStringLiteral(
+                            "ALTER TABLE mail_notification_event_outbox ADD COLUMN body_html TEXT"),
+                    },
+            },
         };
     }
 } // namespace javelin::jmap::cache::migrations

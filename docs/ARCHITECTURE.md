@@ -480,6 +480,27 @@ release, and desktop-presentation failures are therefore local delivery work and
 synchronization solely to recover notification delivery. Notification-baseline activation remains an
 account-synchronization responsibility and is not part of this retry loop.
 
+Incoming `Email/changes` reconciliation fetches selected body values in its existing `Email/get`
+requests for created Emails while notification mailboxes are active. Retained updated Emails whose
+prior membership could prove new entry into a notification mailbox fetch bodies in the same delta
+refresh; ordinary flag updates remain metadata-only. `fetchTextBodyValues` follows RFC 8621's `textBody`
+selection: prefer the plain alternative, or HTML when plain is absent. HTML alternatives and
+attachments are not downloaded for notification detection. Each part is limited to 64 KiB and body
+batches to 32 Emails (or the server's smaller get limit). Initial notification baselines and historical
+rebaselines remain metadata-only. Missing, truncated, or undecodable parts omit authentication actions
+without preventing normal mail delivery.
+
+The selected usable body text, bounded to 128 KiB per Email, is retained only in the pending outbox
+row and committed atomically with Email state and notification consumption. Local retries and restart
+recovery therefore have the same detector input without fetching content or replacing a popup.
+`MailNotificationService` uses the existing authentication detector before desktop delivery and gives
+recognized authentication Emails individual notifications even within an ordinary-mail batch. A valid
+code takes precedence over a link. Authentication actions replace Reply in that popup; Open, Archive,
+and Mark Read remain available. The daemon copies through Plasma's Klipper D-Bus service and opens
+HTTP(S) links through the desktop URI portal, preserving the activation token. These asynchronous
+desktop operations work with the GUI closed and report failures through the notification controller.
+Full raw MIME retrieval for viewing, offline mirroring, and indexing retains its existing vault path.
+
 Mailbox query windows remain presentation coverage only. Notification routing to a concrete Email
 may use its mailbox context to open/materialize the relevant view, but query-window population,
 rebuild, pagination, or thread materialization cannot itself create a notification event. Automatic

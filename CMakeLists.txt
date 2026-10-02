@@ -473,6 +473,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/DeveloperMaintenanceService.h
     src/app/messages/MailboxMaintenanceRegistry.cpp
     src/app/MailboxMaintenanceRegistry.h
+    src/desktop/notifications/DesktopAuthActionExecutor.cpp
+    src/desktop/notifications/DesktopAuthActionExecutor.h
     src/desktop/notifications/DesktopNotificationController.cpp
     src/desktop/notifications/DesktopNotificationController.h
     src/desktop/notifications/KdeNotificationIntegration.cpp
@@ -1935,6 +1937,8 @@ add_library(javelin_daemon_core STATIC
     src/app/ContactCommands.h
     src/app/contacts/ContactCommandService.cpp
     src/app/ContactCommandService.h
+    src/desktop/notifications/DesktopAuthActionExecutor.cpp
+    src/desktop/notifications/DesktopAuthActionExecutor.h
     src/desktop/notifications/DesktopNotificationController.cpp
     src/desktop/notifications/DesktopNotificationController.h
     src/desktop/notifications/KdeNotificationIntegration.cpp

@@ -19,6 +19,7 @@
 #include "app/MessageContentApplicationService.h"
 #include "app/MessageSelection.h"
 #include "daemon/DaemonServices.h"
+#include "desktop/notifications/DesktopAuthActionExecutor.h"
 #include "desktop/notifications/DesktopNotificationController.h"
 #include "desktop/tray/DaemonTrayController.h"
 
@@ -158,6 +159,14 @@ namespace javelin::app
                     .activationToken = activationToken,
                 });
             });
+        auto* authActions = new DesktopAuthActionExecutor(this);
+        connect(m_notifications.get(), &DesktopNotificationController::mailAuthCodeCopyRequested,
+                authActions, &DesktopAuthActionExecutor::copyCode);
+        connect(m_notifications.get(), &DesktopNotificationController::mailAuthLinkOpenRequested,
+                authActions, &DesktopAuthActionExecutor::openLink);
+        connect(authActions, &DesktopAuthActionExecutor::actionFailed, m_notifications.get(),
+                [this](const QString& title, const QString& detail)
+                { m_notifications->notifyError({}, title, detail, false, false); });
         connect(m_notifications.get(), &DesktopNotificationController::errorNotificationActivated,
                 this,
                 [this](const QString& connectionId, const QString& activationToken)

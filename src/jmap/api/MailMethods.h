@@ -145,14 +145,6 @@ namespace javelin::jmap::api
         std::unordered_map<std::string, IdentitySetError> notDestroyed;
     };
 
-    struct EmailGetResponse
-    {
-        std::string accountId;
-        std::string state;
-        std::vector<javelin::jmap::domain::Email> list;
-        std::vector<std::string> notFound;
-    };
-
     struct ThreadGetResponse
     {
         std::string accountId;
@@ -270,6 +262,24 @@ namespace javelin::jmap::api
         std::vector<EmailContentBodyPart> htmlBody;
         std::vector<EmailContentBodyPart> attachments;
         std::unordered_map<std::string, EmailBodyValue> bodyValues;
+    };
+
+    struct EmailGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<javelin::jmap::domain::Email> list;
+        std::vector<std::string> notFound;
+        std::vector<EmailContent> bodyContents = {};
+    };
+
+    struct EmailGetBodyOptions
+    {
+        std::vector<std::string> bodyProperties;
+        bool fetchTextBodyValues = false;
+        bool fetchHTMLBodyValues = false;
+        bool fetchAllBodyValues = false;
+        std::optional<std::uint64_t> maxBodyValueBytes;
     };
 
     struct EmailContentGetRequest
@@ -546,7 +556,8 @@ namespace javelin::jmap::api
     [[nodiscard]] std::optional<MethodRequest<MailboxSetResponse>>
     mailboxSet(const MailboxSetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailGetResponse>>
-    emailGet(const GetRequest& request);
+    emailGet(const GetRequest& request,
+             std::optional<EmailGetBodyOptions> bodyOptions = std::nullopt);
     [[nodiscard]] std::optional<MethodRequest<ThreadGetResponse>>
     threadGet(const GetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailQueryResponse>>

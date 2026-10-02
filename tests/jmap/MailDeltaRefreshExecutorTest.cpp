@@ -2417,3 +2417,225 @@ TEST_CASE("account mail delta marks cached Thread membership stale for a created
     CHECK(std::get<std::optional<javelin::jmap::cache::ThreadMembershipRecord>>(membership)
               ->freshness == javelin::jmap::cache::ThreadMembershipFreshness::Stale);
 }
+
+TEST_CASE("incoming Email delta commits selected bodies with the notification event",
+          "[jmap][sync][mail-delta][notification][body]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    seedNotificationMailboxes(database.connection, {"inbox"});
+    auto object = emailJson("inbox", false);
+    object.pop_back();
+    std::optional<javelin::jmap::cache::MailNotificationBody> expected;
+    SECTION("plain preferred over HTML alternative")
+    {
+        object +=
+            R"(,"textBody":[{"partId":"plain","type":"text/plain"}],"htmlBody":[{"partId":"html","type":"text/html"}],"bodyValues":{"plain":{"value":"Your login code is 123456.","isTruncated":false,"isEncodingProblem":false}}})";
+        expected = javelin::jmap::cache::MailNotificationBody{
+            .plainText = "Your login code is 123456.\n", .html = {}};
+    }
+    SECTION("HTML-only textBody")
+    {
+        object +=
+            R"(,"textBody":[{"partId":"html","type":"TEXT/HTML"}],"bodyValues":{"html":{"value":"<p>Your login code is 123456.</p>","isTruncated":false,"isEncodingProblem":false}}})";
+        expected = javelin::jmap::cache::MailNotificationBody{
+            .plainText = {}, .html = "<p>Your login code is 123456.</p>\n"};
+    }
+    SECTION("truncated body does not prevent mail notification")
+    {
+        object +=
+            R"(,"textBody":[{"partId":"plain","type":"text/plain"}],"bodyValues":{"plain":{"value":"Your login code is 1234","isTruncated":true,"isEncodingProblem":false}}})";
+    }
+    SECTION("decoding error does not prevent mail notification")
+    {
+        object +=
+            R"(,"textBody":[{"partId":"plain","type":"text/plain"}],"bodyValues":{"plain":{"value":"Your login code is 123456","isTruncated":false,"isEncodingProblem":true}}})";
+    }
+    SECTION("missing body value does not prevent mail notification")
+    {
+        object += R"(,"textBody":[{"partId":"plain","type":"text/plain"}],"bodyValues":{}})";
+    }
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse(R"("email-1")", {}, {}, object));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK(std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).notificationEventsCreated);
+    REQUIRE(transport.requests.size() == 1);
+    const auto& request = transport.requests.front().body;
+    CHECK(request.contains("\"fetchTextBodyValues\":true"));
+    CHECK(request.contains("\"fetchHTMLBodyValues\":false"));
+    CHECK(request.contains("\"fetchAllBodyValues\":false"));
+    CHECK(request.contains("\"maxBodyValueBytes\":65536"));
+    CHECK(request.contains("\"maxChanges\":32"));
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto pending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().body == expected);
+    const auto claimed = notifications.claimPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        claimed));
+    REQUIRE(
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed).size() ==
+        1);
+    CHECK(std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(claimed)
+              .front()
+              .body == expected);
+}
+
+TEST_CASE("notification baseline without active mailboxes keeps Email get metadata only",
+          "[jmap][sync][mail-delta][notification][body][baseline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    FakeTransport transport;
+    transport.queuedResults.push_back(
+        emailDeltaResponse(R"("email-1")", {}, {}, emailJson("inbox", false)));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refresh("account-1", {.email = true}, {}, std::vector<std::string>{"inbox"}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK_FALSE(
+        std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).notificationEventsCreated);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK_FALSE(transport.requests.front().body.contains("fetchTextBodyValues"));
+}
+
+TEST_CASE("ordinary Email flag updates do not retrieve notification bodies",
+          "[jmap][sync][mail-delta][notification][body][flags]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"inbox"}, {})}).has_value());
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    seedNotificationMailboxes(database.connection, {"inbox"});
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1")", {}));
+    transport.queuedResults.push_back(updatedEmailResponse("inbox", true));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    CHECK_FALSE(
+        std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result).notificationEventsCreated);
+    REQUIRE(transport.requests.size() == 2);
+    CHECK_FALSE(transport.requests.back().body.contains("fetchTextBodyValues"));
+}
+
+TEST_CASE("mixed Email updates fetch bodies only for possible new mailbox arrivals",
+          "[jmap][sync][mail-delta][notification][body][updates][atomicity]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedEmailState(database.connection);
+    auto ordinary = email({"inbox"}, {});
+    auto arrival = email({"archive"}, {});
+    arrival.id = "email-2";
+    arrival.threadId = "thread-2";
+    arrival.blobId = "blob-email-2";
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {ordinary, arrival}).has_value());
+    javelin::jmap::cache::MailboxRepository mailboxes{database.connection};
+    REQUIRE_FALSE(mailboxes.upsertMany("account-1", {mailbox("inbox", 1, "inbox")}).has_value());
+    seedNotificationMailboxes(database.connection, {"inbox"});
+    auto arrivalJson = emailJsonWithIdentity("email-2", "thread-2", "inbox", false);
+    arrivalJson.pop_back();
+    arrivalJson +=
+        R"(,"textBody":[{"partId":"1","type":"text/plain"}],"bodyValues":{"1":{"value":"Your sign in code is 123456.","isTruncated":false,"isEncodingProblem":false}}})";
+    auto envelope = javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {
+                {.name = "Email/get",
+                 .arguments = getArguments("email-state-2", emailJson("inbox", true)),
+                 .callId = "relevant-updated-emails"},
+            },
+        .createdIds = std::nullopt,
+        .sessionState = "session-state",
+    };
+    bool valid = false;
+    SECTION("both subsets materialize")
+    {
+        valid = true;
+        envelope.methodResponses.push_back({.name = "Email/get",
+                                            .arguments = getArguments("email-state-2", arrivalJson),
+                                            .callId = "relevant-updated-bodies"});
+    }
+    SECTION("missing body subset cannot partially advance metadata or Email state")
+    {
+    }
+    auto serialized = javelin::jmap::api::serializeResponseEnvelope(envelope);
+    REQUIRE(serialized.has_value());
+    FakeTransport transport;
+    transport.queuedResults.push_back(emailDeltaResponse({}, R"("email-1","email-2")", {}));
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200, .body = QByteArray::fromStdString(*serialized)});
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result = QCoro::waitFor(executor.refresh("account-1", {.email = true}));
+    REQUIRE(transport.requests.size() == 2);
+    const auto request =
+        javelin::jmap::api::parseRequestEnvelope(transport.requests.back().body.toStdString());
+    REQUIRE(request.ok());
+    REQUIRE(request.value->methodCalls.size() == 2);
+    CHECK(request.value->methodCalls[0].arguments.find("fetchTextBodyValues") == std::string::npos);
+    CHECK(request.value->methodCalls[1].arguments.find("\"fetchTextBodyValues\":true") !=
+          std::string::npos);
+    javelin::jmap::cache::NotificationRepository notifications{database.connection};
+    const auto pending = notifications.listPendingEvents("account-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(
+        pending));
+    const auto& events =
+        std::get<std::vector<javelin::jmap::cache::MailNotificationPendingEvent>>(pending);
+    if (valid)
+    {
+        REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+        REQUIRE(events.size() == 1);
+        CHECK(events.front().emailId == "email-2");
+        REQUIRE(events.front().body.has_value());
+        CHECK(events.front().body->plainText == "Your sign in code is 123456.\n");
+    }
+    else
+    {
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(events.empty());
+        const auto retained = emails.find("account-1", "email-1");
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(retained));
+        REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(retained).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(retained)->keywords.empty());
+        javelin::jmap::cache::SyncStateRepository states{database.connection};
+        const auto state =
+            states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(state));
+        REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(state).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(state)->stateToken ==
+              "email-state-1");
+    }
+}
