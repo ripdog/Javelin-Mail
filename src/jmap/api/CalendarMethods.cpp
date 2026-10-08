@@ -221,7 +221,7 @@ namespace javelin::jmap::api::detail
         std::optional<std::string> utcStart;
         std::optional<std::string> utcEnd;
         std::optional<RawRecurrenceRule> recurrenceRule;
-        std::unordered_map<std::string, glz::raw_json> recurrenceOverrides;
+        std::optional<std::unordered_map<std::string, glz::raw_json>> recurrenceOverrides;
         std::unordered_map<std::string, RawParticipant> participants;
     };
 
@@ -918,7 +918,7 @@ namespace javelin::jmap::api
                 .utcStart = value.utcStart ? std::optional{value.utcStart->value} : std::nullopt,
                 .utcEnd = value.utcEnd ? std::optional{value.utcEnd->value} : std::nullopt,
                 .recurrenceRule = std::nullopt,
-                .recurrenceOverrides = {},
+                .recurrenceOverrides = std::unordered_map<std::string, glz::raw_json>{},
                 .participants = {}};
             for (const auto& [id, alert] : value.alerts)
                 raw.alerts.emplace(id, rawAlert(alert));
@@ -965,7 +965,7 @@ namespace javelin::jmap::api
                 const auto encoded = rawRecurrenceOverride(valueOverride);
                 if (!encoded)
                     return std::nullopt;
-                raw.recurrenceOverrides.emplace(id, *encoded);
+                raw.recurrenceOverrides->emplace(id, *encoded);
             }
             for (const auto& participant : value.attendees)
                 raw.participants.emplace(participant.id, rawParticipant(participant));
@@ -994,9 +994,9 @@ namespace javelin::jmap::api
                 .useDefaultAlerts = raw.useDefaultAlerts,
                 .alerts = raw.alerts.empty() ? std::nullopt : std::optional{raw.alerts},
                 .recurrenceRule = raw.recurrenceRule,
-                .recurrenceOverrides = raw.recurrenceOverrides.empty()
-                                           ? std::nullopt
-                                           : std::optional{raw.recurrenceOverrides},
+                .recurrenceOverrides = raw.recurrenceOverrides && !raw.recurrenceOverrides->empty()
+                                           ? raw.recurrenceOverrides
+                                           : std::nullopt,
                 .participants =
                     raw.participants.empty() ? std::nullopt : std::optional{raw.participants}};
         }
@@ -1120,12 +1120,15 @@ namespace javelin::jmap::api
                                                                                     ->until}}
                             : std::nullopt};
             }
-            for (const auto& [id, rawOverride] : raw.recurrenceOverrides)
+            if (raw.recurrenceOverrides)
             {
-                const auto parsed = recurrenceOverride(rawOverride);
-                if (!parsed)
-                    return std::nullopt;
-                value.recurrenceOverrides.emplace(id, *parsed);
+                for (const auto& [id, rawOverride] : *raw.recurrenceOverrides)
+                {
+                    const auto parsed = recurrenceOverride(rawOverride);
+                    if (!parsed)
+                        return std::nullopt;
+                    value.recurrenceOverrides.emplace(id, *parsed);
+                }
             }
             for (const auto& [id, participant] : raw.participants)
                 value.attendees.push_back(attendee(id, participant));

@@ -398,6 +398,30 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(serialized->find(R"("chair":true)") != std::string::npos);
 }
 
+TEST_CASE("calendar event get accepts null overrides on expanded occurrences",
+          "[jmap][calendar][recurrence]")
+{
+    // Stalwart returns null recurrence fields for server-expanded recurring instances.
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"c","state":"s73sqk","list":[{"showWithoutTime":false,"start":"2026-10-08T02:20:00","recurrenceId":"2026-10-08T02:20:00","duration":"PT7800S","alerts":{"d5342357-f859-41ac-a2db-26334ca9eae8":{"trigger":{"@type":"OffsetTrigger","offset":"-PT30M","relativeTo":"start"},"@type":"Alert","action":"display","acknowledged":"2026-09-04T18:20:22Z"}},"timeZone":"Pacific/Auckland","uid":"4704279i-7u3tqnsvumtnb64t79utaqnks9@google.com","title":"Water Softener Running","recurrenceRule":null,"recurrenceOverrides":null,"id":"h1k9vuaaaaa3","baseEventId":"3","calendarIds":{"c":true},"isDraft":false,"isOrigin":true,"useDefaultAlerts":false,"utcStart":"2026-10-07T13:20:00Z","utcEnd":"2026-10-07T15:30:00Z"},{"id":"second","baseEventId":"3","recurrenceId":"2026-10-11T02:20:00","uid":"same","calendarIds":{"c":true},"title":"Water Softener Running","start":"2026-10-11T02:20:00","duration":"PT7800S","recurrenceRule":null,"recurrenceOverrides":{}}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 2);
+    const auto& first = parsed.value->list[0];
+    CHECK(first.id == "h1k9vuaaaaa3");
+    CHECK(first.baseEventId == std::optional<std::string>{"3"});
+    REQUIRE(first.recurrenceId.has_value());
+    CHECK(first.recurrenceId->value == "2026-10-08T02:20:00");
+    CHECK_FALSE(first.recurrenceRule.has_value());
+    CHECK(first.recurrenceOverrides.empty());
+    CHECK(first.alerts.size() == 1);
+    CHECK(parsed.value->list[1].recurrenceOverrides.empty());
+
+    const auto invalid = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"c","state":"s73sqk","list":[{"id":"bad","recurrenceOverrides":"not-an-object"}]})");
+    CHECK_FALSE(invalid.ok());
+}
+
 TEST_CASE("calendar event documents preserve recurrence participant patches",
           "[jmap][calendar][recurrence][invitation]")
 {
