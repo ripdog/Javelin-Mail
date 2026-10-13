@@ -1,6 +1,6 @@
 pkgname=javelin-mail-git
 _project_name=Javelin-Mail
-pkgver=0.1.0.r558.g5ec9807
+pkgver=0.1.0.r1122.g6706013e
 pkgrel=1
 pkgdesc='A KDE-focused JMAP email client'
 arch=('x86_64')
@@ -37,13 +37,11 @@ makedepends=(
 )
 provides=('javelin-mail')
 conflicts=('javelin-mail')
-_source_url=${JAVELIN_GIT_URL:-https://github.com/ripdog/Javelin-Mail.git}
-_source_ref=${JAVELIN_GIT_REF:+#commit=${JAVELIN_GIT_REF}}
-source=("${_project_name}::git+${_source_url}${_source_ref}")
-sha256sums=('SKIP')
+# Builds the checkout containing this PKGBUILD in place; nothing is cloned.
+source=()
 
 _repo_root() {
-  printf '%s\n' "$srcdir/$_project_name"
+  printf '%s\n' "$startdir"
 }
 
 _canonical_version() {

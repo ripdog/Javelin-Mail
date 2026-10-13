@@ -189,7 +189,7 @@ The installation includes:
 
 ## Arch package build
 
-The repository contains a development `PKGBUILD` that builds the current checkout:
+The repository contains a development `PKGBUILD` that builds the checkout it sits in, in place, including uncommitted changes and unpushed commits:
 
 ```sh
 makepkg -si
