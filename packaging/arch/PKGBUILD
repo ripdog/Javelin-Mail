@@ -1,6 +1,6 @@
 pkgname=javelin-mail-git
 _project_name=Javelin-Mail
-pkgver=0.1.0.r1122.g6706013e
+pkgver=0.1.0.r1123.g0687c10d
 pkgrel=1
 pkgdesc='A KDE-focused JMAP email client'
 arch=('x86_64')
@@ -37,11 +37,13 @@ makedepends=(
 )
 provides=('javelin-mail')
 conflicts=('javelin-mail')
-# Builds the checkout containing this PKGBUILD in place; nothing is cloned.
+# Builds the enclosing checkout in place; nothing is cloned. This file lives in
+# packaging/arch/ so makepkg's own src/ and pkg/ directories never collide with
+# the repository's src/ tree.
 source=()
 
 _repo_root() {
-  printf '%s\n' "$startdir"
+  realpath "$startdir/../.."
 }
 
 _canonical_version() {

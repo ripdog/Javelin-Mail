@@ -36,13 +36,13 @@ jobs:
 
       - name: Build package
         run: |
-          sudo -u builder bash -lc "cd '$GITHUB_WORKSPACE' && makepkg --syncdeps --noconfirm --cleanbuild --clean"
+          sudo -u builder bash -lc "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --syncdeps --noconfirm --cleanbuild --clean"
 
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: javelin-mail-arch
-          path: '*.pkg.tar.zst'
+          path: 'packaging/arch/*.pkg.tar.zst'
           if-no-files-found: error
 
   flatpak:

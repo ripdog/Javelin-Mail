@@ -117,7 +117,7 @@ There are not yet official stable binary releases. On Arch Linux, the repository
 with:
 
 ```sh
-makepkg -si
+cd packaging/arch && makepkg -si
 ```
 
 For dependency setup, generic CMake builds, development builds, testing, and packaging details, see

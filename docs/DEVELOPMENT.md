@@ -189,10 +189,10 @@ The installation includes:
 
 ## Arch package build
 
-The repository contains a development `PKGBUILD` that builds the checkout it sits in, in place, including uncommitted changes and unpushed commits:
+The repository contains a development `PKGBUILD` that builds the enclosing checkout in place (it lives in `packaging/arch/` so makepkg's own `src/` and `pkg/` stay out of the repository tree), including uncommitted changes and unpushed commits:
 
 ```sh
-makepkg -si
+cd packaging/arch && makepkg -si
 ```
 
 The package version is derived from the CMake project version and current Git revision. After
