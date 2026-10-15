@@ -97,6 +97,67 @@ namespace javelin::gui::compose
             return result;
         }
 
+        // QTextDocument table layout cost grows steeply with nesting; marketing and ticketing
+        // mail routinely nests layout tables a dozen levels deep, which stalls the editor for
+        // tens of seconds. Tables nested beyond this depth are reduced to plain blocks.
+        constexpr int maximumTableNesting = 2;
+
+        [[nodiscard]] QString flattenDeeplyNestedTables(const QString& html)
+        {
+            static const QRegularExpression tableTag{
+                QStringLiteral(
+                    "<(/?)(table|thead|tbody|tfoot|tr|td|th|caption|colgroup|col)\\b[^>]*>"),
+                QRegularExpression::CaseInsensitiveOption};
+
+            if (!html.contains(QStringLiteral("<table"), Qt::CaseInsensitive))
+                return html;
+
+            QString result;
+            result.reserve(html.size());
+            std::vector<bool> flattenedTables;
+            qsizetype previousEnd = 0;
+            auto matches = tableTag.globalMatch(html);
+            while (matches.hasNext())
+            {
+                const auto match = matches.next();
+                result.append(html.sliced(previousEnd, match.capturedStart() - previousEnd));
+                previousEnd = match.capturedEnd();
+
+                const bool closing = !match.capturedView(1).isEmpty();
+                const auto name = match.captured(2).toLower();
+                if (name == QStringLiteral("table"))
+                {
+                    if (closing)
+                    {
+                        const bool flattened = !flattenedTables.empty() && flattenedTables.back();
+                        if (!flattenedTables.empty())
+                            flattenedTables.pop_back();
+                        if (!flattened)
+                            result.append(match.capturedView());
+                    }
+                    else
+                    {
+                        const bool flattened =
+                            static_cast<int>(flattenedTables.size()) >= maximumTableNesting;
+                        flattenedTables.push_back(flattened);
+                        if (!flattened)
+                            result.append(match.capturedView());
+                    }
+                    continue;
+                }
+                if (flattenedTables.empty() || !flattenedTables.back())
+                {
+                    result.append(match.capturedView());
+                    continue;
+                }
+                if (name == QStringLiteral("td") || name == QStringLiteral("th") ||
+                    name == QStringLiteral("caption"))
+                    result.append(closing ? QStringLiteral("</div>") : QStringLiteral("<div>"));
+            }
+            result.append(html.sliced(previousEnd));
+            return result;
+        }
+
     } // namespace
 
     QString htmlForQtDocument(QString html)
@@ -108,7 +169,7 @@ namespace javelin::gui::compose
 
         html.replace(codeOpenTag, QStringLiteral("<span style=\"font-family: monospace;\">"));
         html.replace(codeCloseTag, QStringLiteral("</span>"));
-        return html;
+        return flattenDeeplyNestedTables(html);
     }
 
     QString cleanHtmlFromDocument(const QTextDocument& document)

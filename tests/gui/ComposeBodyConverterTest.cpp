@@ -64,3 +64,24 @@ TEST_CASE("plain text lines become escaped HTML paragraphs", "[gui][compose]")
     CHECK(javelin::gui::compose::plainTextFromHtml(html).toStdString() ==
           std::string{"First & foremost\n\nLast <line>"});
 }
+
+TEST_CASE("deeply nested layout tables are flattened for the Qt document", "[gui][compose]")
+{
+    const auto html = javelin::gui::compose::htmlForQtDocument(QStringLiteral(
+        "<table id=\"a\"><tr><td>one<table id=\"b\"><tr><td>two<table id=\"c\"><tr>"
+        "<td>three<TABLE><tr><th>four</th></tr></TABLE></td></tr></table></td></tr></table>"
+        "</td></tr></table>"));
+
+    CHECK(html.count(QStringLiteral("<table"), Qt::CaseInsensitive) == 2);
+    CHECK(html.count(QStringLiteral("</table"), Qt::CaseInsensitive) == 2);
+    CHECK(html.contains(QStringLiteral("<table id=\"a\">")));
+    CHECK(html.contains(QStringLiteral("<table id=\"b\">")));
+    CHECK_FALSE(html.contains(QStringLiteral("id=\"c\"")));
+    CHECK(html.contains(QStringLiteral("<div>three<div>four</div></div>")));
+}
+
+TEST_CASE("shallow tables are preserved for the Qt document", "[gui][compose]")
+{
+    const QString source = QStringLiteral("<table><tr><td>cell</td></tr></table>");
+    CHECK(javelin::gui::compose::htmlForQtDocument(source) == source);
+}
