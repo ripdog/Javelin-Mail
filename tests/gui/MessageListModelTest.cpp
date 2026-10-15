@@ -226,6 +226,43 @@ TEST_CASE("message list expansion waits for complete Thread cache coverage",
     CHECK(materializationRequests == 1);
 }
 
+TEST_CASE("unchanged list refresh re-reads expanded member read state",
+          "[gui][messages][model][optimistic]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeTestDatabase();
+    seedThreadContext(database.connection);
+    seedSecondThreadEmail(database.connection, true);
+
+    auto summary = item("email-1", "thread-1");
+    summary.mailboxThreadMessageCount = 2;
+    summary.globalThreadMessageCount = 2;
+
+    javelin::gui::messages::MessageListModel model{database.queries};
+    model.setItems("account-1", "mailbox-1", {summary});
+    REQUIRE(model.setThreadExpanded("thread-1", true));
+    REQUIRE(waitUntil([&] { return model.rowCount() == 2; }));
+    REQUIRE(model.data(model.index(1), javelin::gui::messages::MessageListModel::IsUnreadRole)
+                .toBool());
+
+    // Only the non-representative member changes; the summary row compares equal.
+    QSqlQuery markSeen{database.connection.database()};
+    REQUIRE(markSeen.exec(QStringLiteral("INSERT INTO email_keywords(account_id,email_id,keyword) "
+                                         "VALUES('account-1','email-2','$seen')")));
+    model.setItems("account-1", "mailbox-1", {summary});
+
+    REQUIRE(waitUntil(
+        [&]
+        {
+            return !model
+                        .data(model.index(1),
+                              javelin::gui::messages::MessageListModel::IsUnreadRole)
+                        .toBool();
+        }));
+    CHECK(model.rowCount() == 2);
+}
+
 TEST_CASE("optimistic list replacement retains expanded rows and selection geometry",
           "[gui][messages][model][selection][optimistic]")
 {

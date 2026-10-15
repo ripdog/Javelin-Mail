@@ -389,7 +389,9 @@ namespace javelin::gui::messages
                 }
                 endInsertRows();
             }
-            retryPendingThreadMembersLoads();
+            // Member rows are not part of the summaries compared above, so a cache change that
+            // only touches non-representative members must still re-read every expanded block.
+            refreshExpandedThreadMembers();
             return;
         }
 
@@ -843,25 +845,6 @@ namespace javelin::gui::messages
             });
         watcher->setFuture(QtConcurrent::run(javelin::app::loadMessageListThreadMembers,
                                              m_databasePath, accountId, mailboxId, threadId));
-    }
-
-    void MessageListModel::retryPendingThreadMembersLoads()
-    {
-        const bool hasPending = std::ranges::any_of(
-            m_threads, [this](const ThreadEntry& thread)
-            { return !thread.membersLoaded && isThreadExpanded(thread.summary.threadId); });
-        if (!hasPending)
-            return;
-
-        ++m_generation;
-        for (std::size_t threadIndex = 0; threadIndex < m_threads.size(); ++threadIndex)
-        {
-            auto& thread = m_threads[threadIndex];
-            if (thread.membersLoaded || !isThreadExpanded(thread.summary.threadId))
-                continue;
-            thread.membersLoading = false;
-            startThreadMembersLoad(threadIndex);
-        }
     }
 
     int MessageListModel::visibleBlockStartForThread(const std::size_t threadIndex) const
