@@ -255,21 +255,6 @@ Check off completed items as you commit.
 - In Unified Inbox the mailbox is implicit and need not be shown. In global search, render location as
   `Mailbox · Account` in the existing mailbox/location area.
 
-## Deferred / deliberately avoid
-
-### [ ] Reconsider an optional Akonadi bridge only if interoperability requires it
-
-- Do **not** make Akonadi part of Javelin core or replace Javelin's daemon-owned SQLite cache with it.
-- If KOrganizer/KAddressBook interoperability later justifies the cost, investigate an optional
-  external Akonadi resource that talks to Javelin through a narrow interface.
-- Treat duplicated cache/state ownership and synchronization complexity as the primary design risk.
-
-### [ ] Revisit `.ics` calendar import/export separately
-
-- Do not bundle calendar file association/import into `.eml` support merely because desktop MIME
-  integration is being changed.
-- Design iCalendar import/export semantics explicitly before advertising `text/calendar` handling.
-
 ## Architectural guardrails for all items
 
 - The daemon remains the owner of JMAP transports, writable repositories, background work, and

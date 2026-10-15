@@ -1,6 +1,6 @@
 pkgname=javelin-mail-git
 _project_name=Javelin-Mail
-pkgver=0.1.0.r1123.g0687c10d
+pkgver=0.1.0.r1124.gfe533f9f
 pkgrel=1
 pkgdesc='A KDE-focused JMAP email client'
 arch=('x86_64')
