@@ -2,6 +2,8 @@
 
 ## Status
 
+Implemented. Import runs through `MailImportSource`, `MailImportPlanner`, `MailImportRepository`, and `MailImportService` with durable, restart-recoverable work, and is driven from the GUI by `MailImportController`. The text below remains the design record for the invariants and failure policy; the source and tests are authoritative where they differ.
+
 This document defines the implementation plan for importing mail into Javelin from local mail files:
 raw `.eml` messages and conventional mbox-family mailbox files, singly or arranged in directory
 trees. See [MAIL_EXPORT_IMPLEMENTATION_PLAN.md](MAIL_EXPORT_IMPLEMENTATION_PLAN.md) for the matching

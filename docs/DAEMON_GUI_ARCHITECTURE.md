@@ -3,8 +3,7 @@
 ## Status
 
 This document is the authoritative architecture for Javelin's implemented daemon/GUI process split.
-The ordered implementation history, current validation evidence, and remaining release work are
-maintained in [DAEMON_GUI_IMPLEMENTATION_PLAN.md](DAEMON_GUI_IMPLEMENTATION_PLAN.md).
+Remaining release validation is listed in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
 
 The design separates Javelin into two long-lived roles:
 
@@ -1024,86 +1023,6 @@ Workspace/list-session state, quick filters, mail actions/tags, authentication p
 state are owned by focused controllers. The GUI bootstrap remains the composition root for concrete
 compose, contacts, and calendar dependencies and supplies those feature controllers through typed
 factories; the shell is not given `GuiServices&` or the feature command ports themselves.
-
-## Implementation sequence
-
-### 1. Define typed process-boundary interfaces in-process
-
-Create:
-
-- `ApplicationCommand` as a closed typed variant;
-- `CommandReply` and typed application errors;
-- `MaterializationRequest`;
-- `CacheInvalidation`;
-- cache-access suspend and resume barriers;
-- bounded compose revision and attachment-staging commands;
-- typed settings snapshots and updates; and
-- transient daemon status values with explicit queue and coalescing policy.
-
-Route existing GUI commands through an in-process implementation first. Do not start with socket
-serialization.
-
-### 2. Make the daemon side the sole cache writer
-
-Introduce explicit daemon write and GUI read-only database factories. Move all mutating repositories
-and cache transactions behind the daemon-side application interfaces. Add priority-aware admission in
-front of the existing writer serialization and define bounded background transaction units without
-splitting correctness-critical atomic changes.
-
-Remove direct GUI writes and direct GUI mutation-service calls.
-
-### 3. Separate daemon-safe and GUI-only targets
-
-Move WebEngine scheme handling, the complete translation subsystem, navigation state, and
-widget-oriented code out of operational service targets. Ensure the future daemon core links only the
-dependencies it actually requires.
-
-### 4. Move settings authority to daemon `QSettings`
-
-Define the typed shared-settings schema, revision rules, migration, snapshot protocol, and update
-protocol. Remove SQLite settings plans and stop GUI code from opening the canonical shared settings
-store directly. Permit only `TranslationSettingsStore` to open the separate GUI-local translation
-group.
-
-### 5. Add volatile invalidation and transient telemetry interfaces
-
-Replace direct service-to-widget signals with cache invalidations and status values. Add presenter
-refresh generations, off-thread read and diff preparation, guarded model installation, stale-result
-discard, and bounded IPC coalescing. Keep progress and connection health out of SQLite unless they are
-meaningful durable job checkpoints.
-
-### 6. Introduce the local socket
-
-Serialize the already-tested typed interfaces over a framed, versioned, queue-bounded local protocol.
-Preserve the same in-process and out-of-process semantics, including command-result ordering,
-cache-access barriers, compose frame limits, and graceful protocol-version recovery.
-
-### 7. Split the executables
-
-Create `javelind` and make `javelin` a GUI-only process. Add daemon startup, graceful restart,
-reconnection, singleton GUI activation, process-version checks, blocking startup failure UX, and
-notification-route preservation across bootstrap.
-
-### 8. Move tray and notification ownership
-
-Run the existing hardened notification logic in the daemon. Implement tray ownership in the daemon,
-preferably through direct StatusNotifierItem QtDBus integration if that keeps the process simpler and
-headless.
-
-### 9. Tune cache writes and daemon resource use
-
-Measure WAL growth, write rates, foreground admission latency, CPU wake-ups, and daemon memory during:
-
-- idle push operation with no GUI;
-- a large mailbox refresh;
-- complete-offline synchronization;
-- search indexing;
-- rapid pagination and navigation cancellation;
-- notification-heavy mail arrival; and
-- GUI disconnect and later restart.
-
-Remove unchanged writes, coalesce transactions, bound retained working sets, and tune checkpoint and
-batch policy based on measurements rather than adding a second database pre-emptively.
 
 ## Required tests
 

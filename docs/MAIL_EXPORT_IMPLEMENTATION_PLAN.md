@@ -2,6 +2,8 @@
 
 ## Status
 
+Implemented. Export runs through `MailExportService`, `MailExportRepository`, and `MailExportWriter` on the shared daemon scope-resolution and raw-materialization layer, and is driven from the GUI by `MailExportController`. The text below remains the design record for the invariants and failure policy; the source and tests are authoritative where they differ.
+
 This document defines the implementation plan for exporting mail from Javelin as raw `.eml` files
 or mboxrd mailbox files.
 

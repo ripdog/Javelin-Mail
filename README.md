@@ -182,8 +182,7 @@ journalctl --user -u javelind.service -f
 - KDE Plasma on Linux is the actively supported desktop target; other Linux desktops are best-effort.
 - Automatic browser OAuth depends on provider metadata and dynamic client registration; other servers
   require manual API key setup.
-- Account credentials are stored in the daemon's native per-user settings store rather than a
-  desktop secret service.
+- Account credentials are stored by the daemon in KWallet, so a running KWallet service is required.
 - Calendar support should not yet be treated as fully interoperability-hardened.
 
 
@@ -192,9 +191,10 @@ journalctl --user -u javelind.service -f
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — build environment, compilation, testing, and developer workflow
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — major components and how they interact
 - [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — current product and engineering roadmap
+- [`docs/DAEMON_GUI_ARCHITECTURE.md`](docs/DAEMON_GUI_ARCHITECTURE.md) — daemon/GUI process split and IPC contract
 
 Focused design documents for synchronization, offline storage, pagination, Undo/Redo, rendering,
-and the daemon/GUI split are linked from the architecture document.
+import/export, and other subsystems are linked from the architecture document.
 
 ## Acknowledgements
 

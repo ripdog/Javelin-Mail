@@ -8,19 +8,15 @@ belongs in the repository [README](../README.md), while build and test instructi
 [DEVELOPMENT.md](DEVELOPMENT.md).
 
 The process split and IPC contract are defined in
-[DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md); its implementation history and remaining
-release validation are tracked in
-[DAEMON_GUI_IMPLEMENTATION_PLAN.md](DAEMON_GUI_IMPLEMENTATION_PLAN.md). Cross-cutting invariants live
+[DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md). Cross-cutting invariants live
 in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md),
 [offline mail](OFFLINE_MAIL_ARCHITECTURE.md), [query windows](QUERY_WINDOWS.md),
 [database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md),
 [email signatures](EMAIL_SIGNATURES_DESIGN.md), [message rendering](RENDERING.md),
 [mail export](MAIL_EXPORT_IMPLEMENTATION_PLAN.md), and
-[mail import](MAIL_IMPORT_IMPLEMENTATION_PLAN.md). The planned
-split between foreground collapsed-query materialization and bounded background thread hydration is
-specified in [THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
-The long-term, behavior-preserving module and ownership cleanup is tracked in
-[STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md](STRUCTURAL_REFACTOR_IMPLEMENTATION_PLAN.md).
+[mail import](MAIL_IMPORT_IMPLEMENTATION_PLAN.md). The split between foreground collapsed-query
+materialization and bounded background thread hydration is specified in
+[THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md](THREAD_MATERIALIZATION_IMPLEMENTATION_PLAN.md).
 
 Javelin targets Qt 6.10 or newer, KDE Frameworks 6.27 or newer, KDE PIM 6.8 or newer, and C++23. Glaze provides typed JSON parsing at
 the JMAP boundary; QCoro provides coroutine-based Qt networking. KDE Plasma is the primary desktop

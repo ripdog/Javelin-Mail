@@ -7,6 +7,8 @@ Phases 1 and 2 were implemented on 7 August 2026. The dialog now provides typed 
 inspection plus independent SQLite and body-cache clearing, mailbox-scoped maintenance exclusion,
 generation fences, offline-storage conflict handling, vault ownership tracking, explicit
 confirmation, invalidation, remeasurement, and deferred reclamation for leased objects.
+Phases 3 through 5 (other-cache maintenance, the Diagnostics page, and resetting the whole local
+cache) are not implemented yet.
 
 ## Goals
 

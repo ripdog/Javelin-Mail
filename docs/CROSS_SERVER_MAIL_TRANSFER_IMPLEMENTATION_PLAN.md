@@ -2,6 +2,8 @@
 
 ## Status
 
+Implemented. Cross-account Move/Copy runs through the daemon-owned `MailTransferApplicationService`, `MailTransferExecutor`, `MailTransferRepository`, and `MailTransferWorkService`, with durable recovery and Undo/Redo through `MailTransferHistoryService`. The GUI surfaces it through the searchable transfer destination menus and mailbox-tree drag and drop. The text below remains the design record for the invariants and failure policy; the source and tests are authoritative where they differ.
+
 This document defines the implementation plan for copying and moving Email objects between
 mailboxes that may belong to different JMAP accounts and different configured JMAP servers.
 
