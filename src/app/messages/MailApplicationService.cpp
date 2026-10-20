@@ -1973,10 +1973,18 @@ namespace javelin::app
 
         const auto requiredSerial = intent.forceRefresh ? ++m_mailboxRefreshSerial : 0;
         const ForegroundWorkScope foreground{m_workScheduler};
-        co_return co_await requestMailboxWindowAdmitted(std::move(intent), requiredSerial);
+        auto admitted = co_await requestMailboxWindowAdmitted(std::move(intent), requiredSerial);
+        if (auto* summary = std::get_if<MailboxWindowSummary>(&admitted))
+            co_return std::move(*summary);
+        if (auto* error = std::get_if<javelin::jmap::OperationError>(&admitted))
+            co_return std::move(*error);
+        co_return javelin::jmap::OperationError{
+            .code = javelin::jmap::OperationErrorCode::Conflict,
+            .message = i18n("Mail changed repeatedly while loading this view. Please try again."),
+        };
     }
 
-    QCoro::Task<MailboxWindowResult>
+    QCoro::Task<MailQueryApplicationService::AdmittedMailboxResult>
     MailQueryApplicationService::requestMailboxWindowAdmitted(MailboxWindowIntent intent,
                                                               const std::uint64_t requiredSerial)
     {
@@ -2002,7 +2010,7 @@ namespace javelin::app
             }
 
             const auto generation = ++m_admissionGeneration;
-            auto promise = std::make_shared<QPromise<MailboxWindowResult>>();
+            auto promise = std::make_shared<QPromise<AdmittedMailboxResult>>();
             promise->start();
             auto future = promise->future();
             m_mailboxAdmissions.emplace(key, MailboxAdmissionState{
@@ -2012,27 +2020,20 @@ namespace javelin::app
                                                  .promise = std::move(promise),
                                              });
 
-            auto operation = [this, intent]() mutable -> QCoro::Task<MailboxWindowResult>
+            auto operation = [this, intent]() mutable -> QCoro::Task<AdmittedMailboxResult>
             {
                 for (unsigned int attempt = 0; attempt < 3; ++attempt)
                 {
                     auto result = co_await executeMailboxWindowNetwork(intent);
-                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                        co_return *error;
-                    if (const auto* summary = std::get_if<MailboxWindowSummary>(&result))
-                        co_return *summary;
+                    if (!std::holds_alternative<QueryAdmissionSuperseded>(result))
+                        co_return result;
                     co_await yieldMailQueryRetry();
                 }
-
-                co_return javelin::jmap::OperationError{
-                    .code = javelin::jmap::OperationErrorCode::Conflict,
-                    .message =
-                        i18n("Mail changed repeatedly while loading this view. Please try again."),
-                };
+                co_return QueryAdmissionSuperseded{};
             };
             auto task = operation();
             QCoro::connect(std::move(task), this,
-                           [this, key, generation](MailboxWindowResult result)
+                           [this, key, generation](AdmittedMailboxResult result)
                            { completeMailboxAdmission(key, generation, std::move(result)); });
             co_return co_await qCoro(future).result();
         }
@@ -2231,7 +2232,7 @@ namespace javelin::app
 
     void MailQueryApplicationService::completeMailboxAdmission(const std::string& key,
                                                                const std::uint64_t generation,
-                                                               MailboxWindowResult result)
+                                                               AdmittedMailboxResult result)
     {
         const auto active = m_mailboxAdmissions.find(key);
         if (active == m_mailboxAdmissions.end() || active->second.generation != generation)
@@ -2256,9 +2257,11 @@ namespace javelin::app
             .anchor = std::nullopt,
             .anchorOffset = 1,
         };
-        auto result = co_await requestMailboxWindowAdmitted(std::move(intent), 0);
+        const auto result = co_await requestMailboxWindowAdmitted(std::move(intent), 0);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
             co_return *error;
+        if (std::holds_alternative<QueryAdmissionSuperseded>(result))
+            co_return CanonicalMailboxRefreshSuperseded{};
         co_return CanonicalMailboxRefreshSummary{.cacheChanged = true};
     }
 

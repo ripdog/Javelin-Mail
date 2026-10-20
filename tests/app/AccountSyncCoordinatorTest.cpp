@@ -304,6 +304,12 @@ namespace
         [[nodiscard]] QCoro::Task<javelin::app::CanonicalMailboxRefreshResult>
         refreshCanonicalMailbox(std::string accountId, std::string mailboxId) override
         {
+            ++refreshCalls;
+            if (supersededRefreshes > 0)
+            {
+                --supersededRefreshes;
+                co_return javelin::app::CanonicalMailboxRefreshSuperseded{};
+            }
             javelin::jmap::api::MethodCaller caller{m_transport};
             const javelin::jmap::api::ApiRequestContext context{
                 .credentials =
@@ -336,12 +342,7 @@ namespace
                     co_return *error;
                 const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
                 if (summary.superseded)
-                {
-                    co_return javelin::jmap::OperationError{
-                        .code = javelin::jmap::OperationErrorCode::Conflict,
-                        .message = QStringLiteral("The test mailbox refresh was superseded."),
-                    };
-                }
+                    co_return javelin::app::CanonicalMailboxRefreshSuperseded{};
                 cacheChanged = cacheChanged || summary.canonicalWindowMaterialized ||
                                !summary.changedEmailIds.empty() ||
                                summary.effects.emailObjectsChanged;
@@ -356,6 +357,9 @@ namespace
                 .message = QStringLiteral("The test mailbox refresh did not converge."),
             };
         }
+
+        std::size_t refreshCalls = 0;
+        std::size_t supersededRefreshes = 0;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;
@@ -534,6 +538,34 @@ TEST_CASE("full coordinator demands reconcile Email before refreshing all mailbo
     REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState).has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
           "email-state-2");
+}
+
+TEST_CASE("a superseded mailbox refresh is replaced without reporting an error",
+          "[app][account][sync][supersession]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    std::size_t failures = 0;
+    const auto failureConnection = QObject::connect(
+        &fixture.coordinator, &javelin::app::AccountSyncCoordinator::operationFailed,
+        &fixture.coordinator, [&failures] { ++failures; });
+    const auto callsBefore = fixture.queryRefreshPort.refreshCalls;
+    fixture.queryRefreshPort.supersededRefreshes = 1;
+    REQUIRE(fixture.coordinator.requestSynchronization());
+
+    REQUIRE(waitUntil([&fixture, callsBefore]
+                      { return fixture.queryRefreshPort.refreshCalls >= callsBefore + 2; }));
+    CHECK(fixture.queryRefreshPort.supersededRefreshes == 0);
+    QObject::disconnect(failureConnection);
+    CHECK(failures == 0);
 }
 
 TEST_CASE("committed Email delta page publishes before a failed continuation",

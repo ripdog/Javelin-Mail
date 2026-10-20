@@ -363,7 +363,10 @@ and interactive mailbox/search demand from the GUI converge in `MailQueryApplica
 coalesces equivalent in-flight requests by the complete query/window identity and keeps explicit
 refresh, anchors, and retired searches distinct. A per-account mail-cache revision is captured before
 network query work and checked at the SQLite commit boundary so a delayed response cannot overwrite a
-newer Email/query commit; opaque server state tokens are never ordered locally. Consumers reload
+newer Email/query commit; opaque server state tokens are never ordered locally. A response that
+loses that fence after bounded retries is discarded as superseded, not failed: the background
+refresh path reports a typed superseded outcome and the coordinator schedules a debounced replacement
+without surfacing an error, while an interactive window request still reports a conflict. Consumers reload
 affected state from SQLite only after the daemon has committed the corresponding transaction.
 
 ## Cache materialization and navigation

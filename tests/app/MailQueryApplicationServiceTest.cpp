@@ -629,6 +629,15 @@ TEST_CASE("mail query admission fails after repeated cache supersession",
         CHECK(std::get<javelin::jmap::OperationError>(*result).code ==
               javelin::jmap::OperationErrorCode::Conflict);
     }
+    SECTION("background canonical refresh")
+    {
+        std::optional<javelin::app::CanonicalMailboxRefreshResult> result;
+        auto task = fixture.service.refreshCanonicalMailbox("account-1", "inbox");
+        QCoro::connect(std::move(task), &fixture.service,
+                       [&result](auto value) { result = std::move(value); });
+        REQUIRE(waitUntil([&] { return result.has_value(); }));
+        CHECK(std::holds_alternative<javelin::app::CanonicalMailboxRefreshSuperseded>(*result));
+    }
     SECTION("search")
     {
         javelin::app::SearchWindowIntent intent;

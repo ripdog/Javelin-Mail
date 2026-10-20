@@ -14,8 +14,15 @@ namespace javelin::app
         bool cacheChanged = false;
     };
 
+    // A local cache commit landed while the server response was in flight, so the whole response
+    // was discarded. The server and cache remain consistent; the caller owes a replacement refresh.
+    struct CanonicalMailboxRefreshSuperseded
+    {
+    };
+
     using CanonicalMailboxRefreshResult =
-        std::variant<CanonicalMailboxRefreshSummary, javelin::jmap::OperationError>;
+        std::variant<CanonicalMailboxRefreshSummary, CanonicalMailboxRefreshSuperseded,
+                     javelin::jmap::OperationError>;
 
     class MailQueryRefreshPort
     {

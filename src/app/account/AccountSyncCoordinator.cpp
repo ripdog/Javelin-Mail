@@ -835,6 +835,17 @@ namespace javelin::app
                 endpointRequestSucceeded = true;
                 m_shouldCatchUpRefreshOnReconnect = false;
             }
+            else if (std::holds_alternative<CanonicalMailboxRefreshSuperseded>(refreshResult))
+            {
+                // Local commits kept landing while the response was in flight. That is cache
+                // contention, not a failed refresh: replace the discarded response once the burst
+                // settles instead of reporting an error.
+                qInfo().noquote() << "Mailbox refresh superseded by local cache commits; "
+                                     "rescheduling mailbox"
+                                  << QString::fromStdString(mailboxId);
+                endpointRequestSucceeded = true;
+                scheduleDebouncedRefresh(false, {mailboxId});
+            }
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {
                 qWarning().noquote() << "Push mailbox refresh failed" << error->message;

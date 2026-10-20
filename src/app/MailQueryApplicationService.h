@@ -143,7 +143,7 @@ namespace javelin::app
                                                    javelin::jmap::OperationError>;
         using AdmittedSearchResult = std::variant<SearchWindowSummary, QueryAdmissionSuperseded,
                                                   javelin::jmap::OperationError>;
-        [[nodiscard]] QCoro::Task<MailboxWindowResult>
+        [[nodiscard]] QCoro::Task<AdmittedMailboxResult>
         requestMailboxWindowAdmitted(MailboxWindowIntent intent, std::uint64_t requiredSerial);
         [[nodiscard]] QCoro::Task<AdmittedMailboxResult>
         executeMailboxWindowNetwork(MailboxWindowIntent intent);
@@ -152,7 +152,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<AdmittedSearchResult>
         executeSearchWindowNetwork(SearchWindowIntent intent, std::string leaseKey);
         void completeMailboxAdmission(const std::string& key, std::uint64_t generation,
-                                      MailboxWindowResult result);
+                                      AdmittedMailboxResult result);
         void completeSearchAdmission(const std::string& key, std::uint64_t generation,
                                      SearchWindowResult result);
 
@@ -179,8 +179,8 @@ namespace javelin::app
         {
             std::uint64_t generation = 0;
             std::uint64_t dispatchSerial = 0;
-            QFuture<MailboxWindowResult> future;
-            std::shared_ptr<QPromise<MailboxWindowResult>> promise;
+            QFuture<AdmittedMailboxResult> future;
+            std::shared_ptr<QPromise<AdmittedMailboxResult>> promise;
         };
         struct SearchAdmissionState
         {
