@@ -3,8 +3,9 @@
 ## Status
 
 This document is the accepted implementation plan for replacing unbounded collapsed-thread fan-out
-with a split foreground/background materialization model. Implementation is in progress. It records
-the product decisions agreed before implementation and is updated as phases land.
+with a split foreground/background materialization model. Implementation is complete. It records
+the product decisions that shaped the implementation; source and tests are authoritative where they
+differ.
 
 Phase 0 is complete. Deterministic `maxObjectsInGet = 2` fixtures cover both collapsed-page
 implementations: canonical watched-mailbox refresh and the shared continuation/server-search page
@@ -92,6 +93,21 @@ rights, prepare optimistic records, and construct Undo history. Strict selection
 incomplete coverage and never falls back to the representative Email. The parallel GUI tag-menu
 helper no longer expands cached Thread subsets; it leaves aggregate check state unknown for a
 collapsed Thread and sends the original Thread intent unchanged when an action is chosen.
+
+Phase 9 is complete. `EmailMutationBatchSubmitter` splits one logical operation group into
+sequential `Email/set` batches bounded by `maxObjectsInSet`, with tests for ordinary sequential
+settlement and for preserving accepted work across an ambiguous later batch.
+
+Phase 10 is complete. Email delta refresh no longer assumes every changed Email is cached; uncached
+updates and destroys are resolved against Thread membership, tracked windows, and active mutations
+(`MailDeltaRefreshExecutorTest`).
+
+Phase 11 is complete. Complete-offline mailboxes keep their uncollapsed full enumeration and local
+Thread behavior without waiting on online Thread prefetch.
+
+Phase 12 is complete. Server-search windows use the same representative-first pipeline with
+expansion priority and visible materialization progress, and continuation pages get their own
+materialization work.
 
 The target architecture is:
 
