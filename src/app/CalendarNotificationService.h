@@ -9,6 +9,7 @@
 
 #include <QObject>
 
+#include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -72,9 +73,15 @@ namespace javelin::app
         resolvePushedAlert(javelin::jmap::cache::CalendarPushedAlert alert);
         [[nodiscard]] QCoro::Task<void>
         synchronizeDismissal(javelin::jmap::cache::CalendarNotificationCandidate candidate);
+        [[nodiscard]] QCoro::Task<void> drainDismissals(std::string eventKey);
 
         std::unordered_map<std::string, javelin::jmap::cache::CalendarNotificationCandidate>
             m_candidates;
+        // Acknowledgements for one event rewrite the same CalendarEvent, so they run one at a
+        // time. An entry exists only while its drain task is running.
+        std::unordered_map<std::string,
+                           std::deque<javelin::jmap::cache::CalendarNotificationCandidate>>
+            m_pendingDismissals;
         std::unordered_set<std::string> m_pendingPushAlerts;
         std::unordered_map<std::string, javelin::jmap::cache::CalendarNotificationCandidate>
             m_retryPushDeliveries;

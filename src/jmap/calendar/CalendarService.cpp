@@ -4414,7 +4414,7 @@ namespace javelin::jmap::calendar
         std::optional<std::string> operationGroupId,
         std::optional<CalendarRangeMaterialization> materialization,
         const MutationPermission permission, std::function<void()> projectionCommitted,
-        const bool recoverStateMismatch)
+        const int stateMismatchRetries)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -4493,7 +4493,7 @@ namespace javelin::jmap::calendar
             [this, &settings, &ownerAccountId, &request, &calendarIds, &operationGroupId,
              &materialization, permission, &projectionCommitted, &prepared, &journal, &repository,
              &recoveryMaterialization,
-             recoverStateMismatch](OperationError failure) -> QCoro::Task<CalendarMutationResult>
+             stateMismatchRetries](OperationError failure) -> QCoro::Task<CalendarMutationResult>
         {
             if (!prepared.records.empty())
             {
@@ -4503,7 +4503,7 @@ namespace javelin::jmap::calendar
                         prepared.rollbackOccurrences, nullptr, nullptr, nullptr))
                     co_return *restoreError;
             }
-            if (!recoverStateMismatch || !recoveryMaterialization)
+            if (stateMismatchRetries <= 0 || !recoveryMaterialization)
             {
                 if (projectionCommitted)
                     projectionCommitted();
@@ -4612,9 +4612,9 @@ namespace javelin::jmap::calendar
                 if (projectionCommitted)
                     projectionCommitted();
             };
-            auto retried =
-                co_await mutate(settings, ownerAccountId, request, calendarIds, operationGroupId,
-                                materialization, permission, std::move(retryCallback), false);
+            auto retried = co_await mutate(settings, ownerAccountId, request, calendarIds,
+                                           operationGroupId, materialization, permission,
+                                           std::move(retryCallback), stateMismatchRetries - 1);
             if (!retryProjectionCommitted && projectionCommitted)
                 projectionCommitted();
             co_return retried;

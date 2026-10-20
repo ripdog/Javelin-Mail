@@ -69,6 +69,11 @@ namespace javelin::jmap::calendar
                 RespondToEventCommand command, std::function<void()> projectionCommitted = {});
 
       private:
+        // Concurrent writers to one event (for example several reminder dismissals) can each
+        // invalidate the refreshed state this mutation rebased onto, so recovery is bounded
+        // rather than single-shot.
+        static constexpr int defaultStateMismatchRetries = 4;
+
         enum class MutationPermission
         {
             Write,
@@ -82,7 +87,7 @@ namespace javelin::jmap::calendar
                std::optional<std::string> operationGroupId,
                std::optional<CalendarRangeMaterialization> materialization,
                MutationPermission permission, std::function<void()> projectionCommitted,
-               bool recoverStateMismatch = true);
+               int stateMismatchRetries = defaultStateMismatchRetries);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         mutateCalendar(LiveConnectionSettings settings, api::Session session,
                        api::CalendarSetRequest request, std::optional<Calendar> projectedCalendar,

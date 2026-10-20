@@ -581,8 +581,27 @@ namespace javelin::app
             return;
         auto candidate = found->second;
         m_candidates.erase(found);
-        auto task = synchronizeDismissal(std::move(candidate));
-        QCoro::connect(std::move(task), this, []() {});
+        auto eventKey =
+            candidate.ownerAccountId + '\n' + candidate.accountId + '\n' + candidate.eventId;
+        const auto [queue, inserted] = m_pendingDismissals.try_emplace(eventKey);
+        queue->second.push_back(std::move(candidate));
+        if (!inserted)
+            return;
+        QCoro::connect(drainDismissals(std::move(eventKey)), this, []() {});
+    }
+
+    QCoro::Task<void> CalendarNotificationService::drainDismissals(std::string eventKey)
+    {
+        while (true)
+        {
+            auto& queue = m_pendingDismissals[eventKey];
+            if (queue.empty())
+                break;
+            auto candidate = std::move(queue.front());
+            queue.pop_front();
+            co_await synchronizeDismissal(std::move(candidate));
+        }
+        m_pendingDismissals.erase(eventKey);
     }
 
     QCoro::Task<void> CalendarNotificationService::synchronizeDismissal(

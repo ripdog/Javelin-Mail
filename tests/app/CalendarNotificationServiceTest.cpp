@@ -6,6 +6,7 @@
 #include "storage/sqlite/DatabaseConnection.h"
 
 #include <QCoroTask>
+#include <QCoroTimer>
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -46,6 +47,9 @@ namespace
         std::string fetchedUid;
         std::optional<javelin::jmap::OperationError> nextAuthoritativeError;
         int updates = 0;
+        int updateDelayMs = 0;
+        int updatesInFlight = 0;
+        int maxConcurrentUpdates = 0;
         std::string updatedOwnerAccountId;
         std::optional<javelin::jmap::calendar::UpdateEventCommand> updatedCommand;
         int reminderHorizonMaterializations = 0;
@@ -115,8 +119,17 @@ namespace
                             javelin::app::undo::CommandOrigin) override
         {
             ++updates;
+            maxConcurrentUpdates = std::max(maxConcurrentUpdates, ++updatesInFlight);
             updatedOwnerAccountId = std::move(ownerAccountId);
             updatedCommand = std::move(command);
+            if (updateDelayMs > 0)
+            {
+                QTimer delay;
+                delay.setSingleShot(true);
+                delay.start(updateDelayMs);
+                co_await qCoro(delay).waitForTimeout();
+            }
+            --updatesInFlight;
             co_return javelin::jmap::calendar::CommittedMutation{
                 .accountId = updatedCommand->accountId,
                 .newState = "event-state-2",
@@ -694,4 +707,65 @@ TEST_CASE("calendar alert push retries desktop publication without occurrence ma
     REQUIRE(cachedOccurrences.exec(QStringLiteral("SELECT COUNT(*) FROM calendar_occurrences")));
     REQUIRE(cachedOccurrences.next());
     CHECK(cachedOccurrences.value(0).toInt() == 0);
+}
+
+TEST_CASE("dismissing several reminders of one event synchronizes them one at a time",
+          "[app][calendar][notification][push][dismiss]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-notification-serial-dismiss"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedCalendarMetadata(connection);
+
+    FakeCalendarEvents calendarEvents;
+    calendarEvents.event = uncachedEvent();
+    calendarEvents.event.alerts.emplace(
+        "alert-2", javelin::jmap::calendar::Alert{
+                       .id = "alert-2",
+                       .action = "display",
+                       .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                       .relativeTo = "start",
+                       .offset = javelin::jmap::calendar::Duration{.value = "-PT5M"},
+                       .when = std::nullopt,
+                       .acknowledged = std::nullopt,
+                   });
+    calendarEvents.updateDelayMs = 20;
+    javelin::app::CalendarNotificationService service{connection, calendarEvents, calendarEvents};
+    QEventLoop loop;
+    QStringList deliveredKeys;
+    QObject::connect(&service, &javelin::app::CalendarNotificationService::reminderDue, &loop,
+                     [&deliveredKeys, &loop](const QString& key, const QString&, const QString&)
+                     {
+                         deliveredKeys.push_back(key);
+                         if (deliveredKeys.size() == 2)
+                             loop.quit();
+                     });
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timeout.start(2000);
+    for (const auto* alertId : {"alert-1", "alert-2"})
+        service.calendarAlertReceived(QStringLiteral("owner"), QStringLiteral("calendar-account"),
+                                      QStringLiteral("event-1"), QStringLiteral("uid-1"), QString{},
+                                      QString::fromLatin1(alertId));
+    loop.exec();
+    REQUIRE(deliveredKeys.size() == 2);
+    for (const auto& key : deliveredKeys)
+        service.deliveryAccepted(key);
+
+    for (const auto& key : deliveredKeys)
+        service.dismiss(key);
+    QTimer settle;
+    settle.setSingleShot(true);
+    QObject::connect(&settle, &QTimer::timeout, &loop, &QEventLoop::quit);
+    settle.start(500);
+    loop.exec();
+
+    CHECK(calendarEvents.updates == 2);
+    CHECK(calendarEvents.maxConcurrentUpdates == 1);
 }
