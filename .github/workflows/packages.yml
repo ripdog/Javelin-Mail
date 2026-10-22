@@ -21,6 +21,11 @@ jobs:
     container:
       image: archlinux:latest
     steps:
+      # The PKGBUILD derives pkgver from git history, so git must exist before
+      # checkout; otherwise actions/checkout falls back to a .git-less tarball.
+      - name: Install git
+        run: pacman -Syu --noconfirm --needed git
+
       - name: Check out source
         uses: actions/checkout@v5
         with:
@@ -28,7 +33,7 @@ jobs:
 
       - name: Prepare makepkg user
         run: |
-          pacman -Syu --noconfirm --needed base-devel git sudo
+          pacman -S --noconfirm --needed base-devel sudo
           useradd --create-home builder
           printf 'builder ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/builder
           chmod 440 /etc/sudoers.d/builder
