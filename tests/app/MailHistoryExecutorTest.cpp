@@ -40,7 +40,7 @@ namespace
                 .vaultProjectionWorkQueued = false,
                 .mailboxCountsChanged = false,
                 .receipt = {},
-            };
+        };
         std::vector<javelin::jmap::EmailMailboxMutation> queued;
 
         QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>

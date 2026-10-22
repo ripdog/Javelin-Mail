@@ -108,7 +108,7 @@ TEST_CASE("session repository round-trips cached session bootstrap", "[jmap][cac
             .maxExpandedQueryDuration = "P1Y",
             .maxParticipantsPerEvent = 100,
             .mayCreateCalendar = false,
-        };
+    };
 
     if (const auto error = repository.replace("u1", session))
     {

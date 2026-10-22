@@ -83,7 +83,7 @@ TEST_CASE(
               mailbox("child", "Child", std::nullopt, true, std::string{"parent"})}},
             {"local-readonly", {mailbox("readonly", "Read only")}},
             {"local-calendar", {mailbox("calendar-mailbox", "Impossible")}},
-        };
+    };
 
     const auto presentation = javelin::gui::shell::buildMessageTransferDestinationPresentation(
         "local-a", accounts, mailboxes, [](const QStringView accountId)
@@ -138,7 +138,7 @@ TEST_CASE("transfer destination presentation disambiguates duplicate configured 
             {"account-a", {mailbox("a", "A")}},
             {"account-b", {mailbox("b", "B")}},
             {"account-c-123456789", {mailbox("c", "C")}},
-        };
+    };
 
     const auto presentation = javelin::gui::shell::buildMessageTransferDestinationPresentation(
         "source", accounts, mailboxes,
@@ -165,7 +165,7 @@ TEST_CASE("transfer destination presentation omits accounts without writable mai
         mailboxes{
             {"source", {mailbox("inbox", "Inbox")}},
             {"locked", {mailbox("locked-mailbox", "Locked", std::nullopt, false)}},
-        };
+    };
 
     const auto presentation = javelin::gui::shell::buildMessageTransferDestinationPresentation(
         "source", accounts, mailboxes);
