@@ -57,6 +57,34 @@ TEST_CASE("HTML text extraction ignores non-content elements and tolerates malfo
     CHECK(text == QStringLiteral("Before bold\nAfter &unknown; 🙂"));
 }
 
+TEST_CASE("HTML text extraction does not let a stray attribute quote swallow the document",
+          "[jmap][render][html]")
+{
+    SECTION("unbalanced quote inside a style value")
+    {
+        const auto text = javelin::jmap::render::plainTextFromHtml(QStringLiteral(
+            R"(<table style="color: red; bgcolor="#FFF"><tr><td style="color:#838586">Hello</td></tr></table>)"));
+
+        CHECK(text == QStringLiteral("Hello"));
+    }
+
+    SECTION("quotes are literal inside unquoted values and between attributes")
+    {
+        const auto text = javelin::jmap::render::plainTextFromHtml(
+            QStringLiteral(R"(<a href=x"y>link</a><p class=a'b data-x = "1>2">tail</p>)"));
+
+        CHECK(text == QStringLiteral("link\ntail"));
+    }
+
+    SECTION("a greater-than sign inside a quoted value does not end the tag")
+    {
+        const auto text = javelin::jmap::render::plainTextFromHtml(
+            QStringLiteral(R"(<p title='a > b' data-x="c > d">body</p>)"));
+
+        CHECK(text == QStringLiteral("body"));
+    }
+}
+
 TEST_CASE("HTML text extraction preserves preformatted whitespace", "[jmap][render][html]")
 {
     const auto text = javelin::jmap::render::plainTextFromHtml(

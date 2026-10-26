@@ -277,3 +277,24 @@ TEST_CASE("authentication action detector recognizes contextual plain-text links
         CHECK_FALSE(result.action.has_value());
     }
 }
+
+TEST_CASE("authentication action detector ignores CSS colours in malformed HTML",
+          "[cache][message-auth-action]")
+{
+    // The unbalanced quote in the table's style attribute previously made the rest of the
+    // document parse as text, so footer colours such as #838586 scored as verification codes.
+    const auto result = MessageAuthActionDetector{}.detect({
+        .subject = QStringLiteral("Verify your email to create your account"),
+        .plainText = {},
+        .html = QStringLiteral(
+            R"(<html><body><table style="color: #4e5052; bgcolor="#FFF"><tr><td>
+               <p>To create your account, please verify your email address by clicking below.</p>
+               <a href="https://signup.example.test?verify_email=abc"><img src="https://example.test/button.png"></a>
+               <div style="color:#838586;text-decoration:none">Footer</div>
+               </td></tr></table></body></html>)"),
+    });
+
+    REQUIRE(result.action.has_value());
+    CHECK(result.action->kind == MessageAuthActionKind::OpenLink);
+    CHECK(result.action->value == QStringLiteral("https://signup.example.test?verify_email=abc"));
+}

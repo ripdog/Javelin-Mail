@@ -167,23 +167,56 @@ namespace javelin::jmap::render
 
         [[nodiscard]] qsizetype tagEnd(const QString& html, const qsizetype start)
         {
+            // Follows the HTML tokenizer: a quote delimits a value only directly after '='.
+            // Elsewhere in a tag it is an ordinary character, so a stray quote in malformed
+            // markup (`style="a; bgcolor="#FFF">`) cannot swallow the rest of the document.
+            enum class State
+            {
+                Name,
+                BeforeValue,
+                QuotedValue,
+                UnquotedValue,
+            };
+
+            auto state = State::Name;
             QChar quote;
             for (auto offset = start; offset < html.size(); ++offset)
             {
                 const auto character = html.at(offset);
-                if (!quote.isNull())
+                switch (state)
                 {
+                case State::Name:
+                    if (character == QLatin1Char('>'))
+                        return offset;
+                    if (character == QLatin1Char('='))
+                        state = State::BeforeValue;
+                    break;
+                case State::BeforeValue:
+                    if (character.isSpace())
+                        break;
+                    if (character == QLatin1Char('>'))
+                        return offset;
+                    if (character == QLatin1Char('\'') || character == QLatin1Char('"'))
+                    {
+                        quote = character;
+                        state = State::QuotedValue;
+                    }
+                    else
+                    {
+                        state = State::UnquotedValue;
+                    }
+                    break;
+                case State::QuotedValue:
                     if (character == quote)
-                        quote = {};
-                    continue;
+                        state = State::Name;
+                    break;
+                case State::UnquotedValue:
+                    if (character == QLatin1Char('>'))
+                        return offset;
+                    if (character.isSpace())
+                        state = State::Name;
+                    break;
                 }
-                if (character == QLatin1Char('\'') || character == QLatin1Char('"'))
-                {
-                    quote = character;
-                    continue;
-                }
-                if (character == QLatin1Char('>'))
-                    return offset;
             }
             return -1;
         }
