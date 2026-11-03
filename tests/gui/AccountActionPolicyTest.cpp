@@ -2,7 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -95,4 +97,47 @@ TEST_CASE("account action policy reports unavailable mail actions without mail c
 
     CHECK_FALSE(state.preferredMailAccountId.has_value());
     CHECK_FALSE(state.preferredSubmissionAccountId.has_value());
+}
+
+TEST_CASE("removed account tabs are listed from the last tab to the first",
+          "[gui][shell][accounts][tabs]")
+{
+    const std::vector<javelin::gui::shell::AccountActionAccount> accounts{
+        {.accountId = "kept", .hasMailCapability = true},
+    };
+    const std::vector<std::optional<std::string>> tabAccounts{
+        std::optional<std::string>{"removed"}, // home mailbox
+        std::optional<std::string>{"kept"},
+        std::nullopt, // contacts or calendar
+        std::optional<std::string>{"removed"},
+    };
+
+    const auto tabs = javelin::gui::shell::tabIndexesOfRemovedAccounts(tabAccounts, accounts);
+
+    CHECK(tabs == std::vector<std::size_t>{3, 0});
+}
+
+TEST_CASE("every account tab is removed when no account remains", "[gui][shell][accounts][tabs]")
+{
+    const std::vector<std::optional<std::string>> tabAccounts{
+        std::optional<std::string>{"removed"},
+        std::nullopt,
+    };
+
+    CHECK(javelin::gui::shell::tabIndexesOfRemovedAccounts(tabAccounts, {}) ==
+          std::vector<std::size_t>{0});
+}
+
+TEST_CASE("no tabs are removed while their accounts remain", "[gui][shell][accounts][tabs]")
+{
+    const std::vector<javelin::gui::shell::AccountActionAccount> accounts{
+        {.accountId = "a", .hasMailCapability = true},
+        {.accountId = "b", .hasMailCapability = true},
+    };
+    const std::vector<std::optional<std::string>> tabAccounts{
+        std::optional<std::string>{"a"},
+        std::optional<std::string>{"b"},
+    };
+
+    CHECK(javelin::gui::shell::tabIndexesOfRemovedAccounts(tabAccounts, accounts).empty());
 }

@@ -266,6 +266,14 @@ namespace javelin::gui::shell
                                      javelin::jmap::search::EmailSearchCriteria criteria,
                                      bool refreshRemote);
         void closeTab(int index);
+        enum class TabCloseReason
+        {
+            UserRequested,
+            AccountRemoved,
+        };
+        void closeTabForReason(int index, TabCloseReason reason);
+        void closeTabsOfRemovedAccounts();
+        [[nodiscard]] bool hasHomeMailboxTab() const;
         void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
         void refreshActiveTabFromServer();
         void refreshTabFromServer(std::size_t tabIndex);
@@ -298,7 +306,7 @@ namespace javelin::gui::shell
         void openPreferences();
         void configureEmailContextMenu();
         void configureCalendarEventContextMenu();
-        void refreshAccountActionAccounts();
+        bool refreshAccountActionAccounts();
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();

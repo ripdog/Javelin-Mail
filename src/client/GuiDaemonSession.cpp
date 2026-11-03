@@ -380,7 +380,13 @@ namespace javelin::app
         const auto reply =
             m_client->updateSettings({.baseRevision = baseRevision, .update = std::move(update)});
         if (const auto* rejected = std::get_if<protocol::SettingsUpdateRejected>(&reply))
+        {
+            // Callers rebase a stale update on the snapshot, so it must already be current.
+            if (rejected->error.code == protocol::BoundaryErrorCode::StaleSettingsRevision &&
+                !refreshSettings().has_value())
+                Q_EMIT settingsChanged();
             return rejected->error;
+        }
 
         if (const auto error = refreshSettings())
         {

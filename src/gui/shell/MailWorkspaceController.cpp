@@ -125,10 +125,15 @@ namespace javelin::gui::shell
                                                        .restored = std::nullopt});
         if (m_tabs.empty())
             m_tabs.push_back(std::move(tab));
-        else
+        else if (std::holds_alternative<MailboxTabState>(m_tabs[0].content))
         {
             m_messageListTabs.releaseSession(m_tabs[0]);
             m_tabs[0] = std::move(tab);
+        }
+        else
+        {
+            // Without a home mailbox, the first tab is some other kind of tab that must survive.
+            m_tabs.insert(m_tabs.begin(), std::move(tab));
         }
         m_activeIndex = 0;
         return 0;

@@ -64,4 +64,20 @@ namespace javelin::gui::shell
         return {.preferredMailAccountId = std::move(mail),
                 .preferredSubmissionAccountId = std::move(submission)};
     }
+
+    std::vector<std::size_t>
+    tabIndexesOfRemovedAccounts(const std::span<const std::optional<std::string>> tabAccountIds,
+                                const std::span<const AccountActionAccount> accounts)
+    {
+        std::vector<std::size_t> removed;
+        for (std::size_t index = tabAccountIds.size(); index > 0; --index)
+        {
+            const auto& accountId = tabAccountIds[index - 1];
+            if (accountId.has_value() &&
+                std::ranges::find(accounts, *accountId, &AccountActionAccount::accountId) ==
+                    accounts.end())
+                removed.push_back(index - 1);
+        }
+        return removed;
+    }
 } // namespace javelin::gui::shell

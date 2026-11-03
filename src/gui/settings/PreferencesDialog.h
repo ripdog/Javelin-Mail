@@ -121,8 +121,13 @@ namespace javelin::gui::settings
             QString mailboxName;
         };
 
+        void rebaseOnCurrentSettings();
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
+        submitSettingsUpdate(javelin::protocol::SettingsUpdate update);
+
         GuiSettings& m_settings;
         javelin::protocol::SettingsRevision m_baseRevision;
+        javelin::protocol::SettingsSnapshot m_baseSettings;
         javelin::app::AccountCommandPort& m_accountCommandPort;
         javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::app::OnboardingPort& m_onboardingPort;

@@ -6,6 +6,42 @@
 
 namespace javelin::gui::settings
 {
+    namespace
+    {
+        template <typename Section>
+        [[nodiscard]] bool sectionUnchanged(const std::optional<Section>& replacement,
+                                            const Section& baseline, const Section& current)
+        {
+            return !replacement.has_value() || baseline == current;
+        }
+
+        [[nodiscard]] bool
+        replacedSectionsUnchanged(const javelin::protocol::SettingsSnapshot& baseline,
+                                  const javelin::protocol::SettingsSnapshot& current,
+                                  const javelin::protocol::SettingsUpdate& update)
+        {
+            return sectionUnchanged(update.accounts, baseline.accounts, current.accounts) &&
+                   sectionUnchanged(update.syncedMailboxSelections,
+                                    baseline.syncedMailboxSelections,
+                                    current.syncedMailboxSelections) &&
+                   sectionUnchanged(update.notificationMailboxSelections,
+                                    baseline.notificationMailboxSelections,
+                                    current.notificationMailboxSelections) &&
+                   sectionUnchanged(update.remoteContentSenders, baseline.remoteContentSenders,
+                                    current.remoteContentSenders) &&
+                   sectionUnchanged(update.remoteContentDomains, baseline.remoteContentDomains,
+                                    current.remoteContentDomains) &&
+                   sectionUnchanged(update.appearance, baseline.appearance, current.appearance) &&
+                   sectionUnchanged(update.attachments, baseline.attachments,
+                                    current.attachments) &&
+                   sectionUnchanged(update.undoSendDelaySeconds, baseline.undoSendDelaySeconds,
+                                    current.undoSendDelaySeconds) &&
+                   sectionUnchanged(update.undoSendUsesDialog, baseline.undoSendUsesDialog,
+                                    current.undoSendUsesDialog) &&
+                   sectionUnchanged(update.workspace, baseline.workspace, current.workspace);
+        }
+    } // namespace
+
     GuiSettings::GuiSettings(javelin::app::SettingsPort& port) : m_port(&port)
     {
     }
@@ -154,6 +190,21 @@ namespace javelin::gui::settings
             value.workspace = std::move(*update.workspace);
         ++value.revision.value;
         return std::nullopt;
+    }
+
+    std::optional<javelin::protocol::BoundaryError>
+    GuiSettings::updateRebased(const javelin::protocol::SettingsSnapshot& baseline,
+                               javelin::protocol::SettingsUpdate update)
+    {
+        if (!replacedSectionsUnchanged(baseline, snapshot(), update))
+        {
+            return javelin::protocol::BoundaryError{
+                .code = javelin::protocol::BoundaryErrorCode::StaleSettingsRevision,
+                .field = QStringLiteral("settings.revision"),
+                .detail = QStringLiteral("The settings being saved were changed elsewhere."),
+            };
+        }
+        return this->update(snapshot().revision, std::move(update));
     }
 
     std::optional<javelin::protocol::BoundaryError>

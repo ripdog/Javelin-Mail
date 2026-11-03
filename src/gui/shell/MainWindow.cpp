@@ -2949,19 +2949,26 @@ namespace javelin::gui::shell
 
     void MainWindow::closeTab(const int index)
     {
+        closeTabForReason(index, TabCloseReason::UserRequested);
+    }
+
+    void MainWindow::closeTabForReason(const int index, const TabCloseReason reason)
+    {
         if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
         {
             return;
         }
         auto& tab = m_tabs[static_cast<std::size_t>(index)];
-        if (!tabCanClose(tab, static_cast<std::size_t>(index)))
+        // A removed account takes its home tab with it, and its tabs cannot be reopened.
+        const bool accountRemoved = reason == TabCloseReason::AccountRemoved;
+        if (!accountRemoved && !tabCanClose(tab, static_cast<std::size_t>(index)))
         {
             return;
         }
 
         const auto kind = tabKind(tab);
         std::unique_ptr<ClosedTabState> closedTab;
-        if (kind != TabKind::Compose)
+        if (kind != TabKind::Compose && !accountRemoved)
             closedTab = std::make_unique<ClosedTabState>(ClosedTabState{persistTab(tab)});
 
         if (kind == TabKind::Compose && !closeComposeTab(index))
@@ -2980,8 +2987,11 @@ namespace javelin::gui::shell
         if (!m_mailWorkspaceController->eraseTab(index))
             return;
 
-        m_lastClosedTab = std::move(closedTab);
-        m_reopenClosedTabAction->setEnabled(m_lastClosedTab != nullptr);
+        if (!accountRemoved)
+        {
+            m_lastClosedTab = std::move(closedTab);
+            m_reopenClosedTabAction->setEnabled(m_lastClosedTab != nullptr);
+        }
         if (!m_activeTabIndex.has_value())
         {
             activateTab(-1, false);
@@ -2990,6 +3000,62 @@ namespace javelin::gui::shell
 
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
+    }
+
+    bool MainWindow::hasHomeMailboxTab() const
+    {
+        return !m_tabs.empty() && std::holds_alternative<MailboxTabState>(m_tabs.front().content);
+    }
+
+    void MainWindow::closeTabsOfRemovedAccounts()
+    {
+        if (!refreshAccountActionAccounts())
+            return;
+
+        if (m_lastClosedTab != nullptr)
+        {
+            const auto lastClosedAccountId = std::visit(
+                [](const auto& tab) -> std::optional<std::string>
+                {
+                    using Persisted = std::decay_t<decltype(tab)>;
+                    if constexpr (std::is_same_v<Persisted, PersistedMailboxTab> ||
+                                  std::is_same_v<Persisted, PersistedSearchTab> ||
+                                  std::is_same_v<Persisted, PersistedComposeTab>)
+                        return tab.accountId;
+                    else
+                        return std::nullopt;
+                },
+                m_lastClosedTab->tab);
+            const auto accounts = std::span<const AccountActionAccount>{m_accountActionAccounts};
+            if (lastClosedAccountId.has_value() &&
+                std::ranges::find(accounts, *lastClosedAccountId,
+                                  &AccountActionAccount::accountId) == accounts.end())
+            {
+                m_lastClosedTab.reset();
+                m_reopenClosedTabAction->setEnabled(false);
+            }
+        }
+
+        std::vector<std::optional<std::string>> tabAccountIds;
+        tabAccountIds.reserve(m_tabs.size());
+        for (const auto& tab : m_tabs)
+            tabAccountIds.push_back(tabAccountId(tab));
+        const auto removedTabs =
+            tabIndexesOfRemovedAccounts(tabAccountIds, m_accountActionAccounts);
+        if (removedTabs.empty())
+            return;
+
+        for (const auto index : removedTabs)
+            closeTabForReason(static_cast<int>(index), TabCloseReason::AccountRemoved);
+
+        // The mailbox tree selection drives the home tab, so reselect an Inbox once the tree has
+        // been rebuilt without the removed account.
+        if (!hasHomeMailboxTab())
+        {
+            m_pendingInitialMailboxAccountId =
+                accountWorkspaceActionState(m_accountActionAccounts, std::nullopt)
+                    .preferredMailAccountId;
+        }
     }
 
     void
@@ -3402,14 +3468,14 @@ namespace javelin::gui::shell
         static_cast<void>(m_mailWorkspaceController->loadMore(*tab));
     }
 
-    void MainWindow::refreshAccountActionAccounts()
+    bool MainWindow::refreshAccountActionAccounts()
     {
         m_accountActionAccounts.clear();
         const auto accountsResult = m_accountReader.listAll();
         const auto* accounts =
             std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
         if (accounts == nullptr)
-            return;
+            return false;
         m_accountActionAccounts.reserve(accounts->size());
         for (const auto& account : *accounts)
         {
@@ -3421,6 +3487,7 @@ namespace javelin::gui::shell
                 .hasSubmissionCapability = account.hasSubmissionCapability,
             });
         }
+        return true;
     }
 
     void MainWindow::reloadAccounts()
@@ -3511,7 +3578,7 @@ namespace javelin::gui::shell
         if (!m_pendingInitialMailboxAccountId.has_value())
             return;
 
-        if (!m_tabs.empty() || currentMailboxId(*m_mailboxView).has_value())
+        if (hasHomeMailboxTab() || currentMailboxId(*m_mailboxView).has_value())
         {
             m_pendingInitialMailboxAccountId.reset();
             return;
@@ -3788,12 +3855,15 @@ namespace javelin::gui::shell
                 { m_accountRefreshController->refreshConnection(settings); });
         if (!connectionId.isEmpty())
             dialog.selectConfiguredAccount(connectionId);
-        if (dialog.exec() == QDialog::Accepted)
+        const bool accepted = dialog.exec() == QDialog::Accepted;
+        // Apply followed by Cancel can also remove accounts.
+        closeTabsOfRemovedAccounts();
+        m_mailboxModel->refresh();
+        if (accepted)
         {
             m_messageViewContainer->appearanceSettingsChanged();
             m_messageViewContainer->translationSettingsChanged();
             m_statusBar->showMessage(i18n("Saved preferences."), 3000);
-            m_mailboxModel->refresh();
             const auto accountId = preferredMailAccountId();
             if (accountId.has_value())
             {

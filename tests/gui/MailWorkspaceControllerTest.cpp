@@ -163,3 +163,34 @@ TEST_CASE("home mailbox activation resets an active quick filter",
     CHECK_FALSE(replacement->quickFilterActive());
     CHECK(factory.mailboxCreateCount == 2);
 }
+
+TEST_CASE("home mailbox activation keeps a leading tab that is not a mailbox",
+          "[gui][mail-workspace][accounts]")
+{
+    IdleMaterializationPort materialization;
+    FakeMailEvents events;
+    RecordingSessionFactory factory{materialization, events};
+    QObject sessionParent;
+    javelin::gui::shell::MailWorkspaceController workspace{factory, 100, &sessionParent};
+
+    // Removing the home mailbox's account leaves whatever tab followed it in front.
+    workspace.tabs().push_back({.content = javelin::gui::shell::ContactsTabState{
+                                    .title = QStringLiteral("Contacts"),
+                                    .widget = nullptr,
+                                    .selection = {},
+                                }});
+
+    CHECK(workspace.activateHomeMailbox("account-2", "inbox", QStringLiteral("Inbox"),
+                                        std::optional<std::string>{"inbox"}) == 0);
+
+    REQUIRE(workspace.tabs().size() == 2);
+    const auto* home =
+        std::get_if<javelin::gui::shell::MailboxTabState>(&workspace.tabs()[0].content);
+    REQUIRE(home != nullptr);
+    CHECK(home->session->accountId() == "account-2");
+    const auto* contacts =
+        std::get_if<javelin::gui::shell::ContactsTabState>(&workspace.tabs()[1].content);
+    REQUIRE(contacts != nullptr);
+    CHECK(contacts->title == QStringLiteral("Contacts"));
+    CHECK(workspace.activeIndex() == std::optional<int>{0});
+}

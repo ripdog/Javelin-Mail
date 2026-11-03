@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <variant>
 
@@ -94,7 +95,7 @@ namespace
                 QThread::msleep(150);
             return SettingsSnapshotReply{
                 .snapshot = {
-                    .revision = {.value = 1},
+                    .revision = {.value = settingsRevision.load()},
                     .schemaVersion = 3,
                     .accounts = {},
                     .syncedMailboxSelections = {},
@@ -123,6 +124,15 @@ namespace
 
         SettingsUpdateReply handleUpdateSettings(UpdateSettingsRequest request) override
         {
+            if (rejectUpdatesAsStale.load())
+            {
+                return SettingsUpdateRejected{
+                    .currentRevision = {.value = settingsRevision.load()},
+                    .error = {.code = BoundaryErrorCode::StaleSettingsRevision,
+                              .field = QStringLiteral("settings.revision"),
+                              .detail = QStringLiteral("settings changed since this update was "
+                                                       "read")}};
+            }
             return SettingsUpdated{.revision = {.value = request.baseRevision.value + 1}};
         }
 
@@ -151,6 +161,8 @@ namespace
         std::atomic_int settingsCount = 0;
         std::atomic_int activationCount = 0;
         std::atomic_bool guiReady = false;
+        std::atomic<std::uint64_t> settingsRevision = 1;
+        std::atomic_bool rejectUpdatesAsStale = false;
 
       private:
         QString m_cachePath;
@@ -399,4 +411,64 @@ TEST_CASE("GUI bootstrap automatically resumes the exact late daemon reply at ev
     CHECK(handler.helloCount.load() == 1);
     CHECK(handler.settingsCount.load() == 1);
     CHECK(handler.activationCount.load() == 1);
+}
+
+TEST_CASE("GUI settings snapshot is current after the daemon rejects an update as stale",
+          "[app][gui][settings]")
+{
+    ApplicationGuard application;
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    const auto cachePath =
+        QDir{runtimeDirectory.path()}.filePath(QStringLiteral("javelin-cache.sqlite3"));
+    {
+        auto opened = javelin::jmap::cache::DatabaseConnection::open({
+            .connectionName = QStringLiteral("gui-recovery-writer-%1")
+                                  .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)),
+            .databasePath = cachePath,
+        });
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+            FAIL(error->message.toStdString());
+    }
+
+    const auto socketPath = QDir{runtimeDirectory.path()}.filePath(QStringLiteral("javelind.sock"));
+    SlowBootstrapHandler handler{cachePath, SlowBootstrapStage::Hello};
+    SocketEndpointThread endpoint{
+        handler,
+        {.runtimeDirectory = runtimeDirectory.path(),
+         .socketPath = socketPath,
+         .limits = {},
+         .protocol = {.major = 5, .minor = 11},
+         .expectedBuild = BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
+                                        .revision = QStringLiteral("test")},
+         .maximumQueuedFrames = 8,
+         .maximumQueuedBytes = 4 * 1024 * 1024,
+         .responseTimeoutMilliseconds = 2000,
+         .enforcePeerCredentials = true}};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    javelin::app::GuiDaemonSession session{{.runtimeDirectory = runtimeDirectory.path(),
+                                            .socketPath = socketPath,
+                                            .daemonExecutable = {},
+                                            .protocol = {.major = 5, .minor = 11},
+                                            .build = {.application = QStringLiteral("Javelin-Mail"),
+                                                      .revision = QStringLiteral("test")},
+                                            .startTimeoutMilliseconds = 500,
+                                            .responseTimeoutMilliseconds = 500,
+                                            .startDaemonIfMissing = false}};
+    REQUIRE_FALSE(session.start().has_value());
+    REQUIRE(session.settings().revision.value == 1);
+
+    // Another writer, such as the main window saving its geometry, moves the daemon on.
+    handler.settingsRevision.store(2);
+    handler.rejectUpdatesAsStale.store(true);
+
+    SettingsUpdate update;
+    update.undoSendDelaySeconds = 30;
+    const auto error = session.updateSettings({.value = 1}, std::move(update));
+
+    REQUIRE(error.has_value());
+    CHECK(error->code == BoundaryErrorCode::StaleSettingsRevision);
+    CHECK(session.settings().revision.value == 2);
 }

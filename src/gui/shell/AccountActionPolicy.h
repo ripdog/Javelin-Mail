@@ -4,6 +4,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace javelin::gui::shell
 {
@@ -25,4 +26,10 @@ namespace javelin::gui::shell
     [[nodiscard]] AccountWorkspaceActionState
     accountWorkspaceActionState(std::span<const AccountActionAccount> accounts,
                                 std::optional<std::string_view> preferredAccountId);
+
+    /// Returns the indexes, highest first, of tabs bound to an account that is no longer present.
+    /// Tabs without an account, such as contacts and calendar, are never selected.
+    [[nodiscard]] std::vector<std::size_t>
+    tabIndexesOfRemovedAccounts(std::span<const std::optional<std::string>> tabAccountIds,
+                                std::span<const AccountActionAccount> accounts);
 } // namespace javelin::gui::shell

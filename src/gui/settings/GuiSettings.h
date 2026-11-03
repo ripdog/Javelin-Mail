@@ -46,6 +46,13 @@ namespace javelin::gui::settings
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         update(javelin::protocol::SettingsRevision baseRevision,
                javelin::protocol::SettingsUpdate update);
+        /// Retries an update that was rejected as stale against the current revision. This is only
+        /// safe when the sections the update replaces are identical in `baseline`, the snapshot the
+        /// update was built from, and the current snapshot, so that only unrelated settings (such
+        /// as the saved window state) changed in between.
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
+        updateRebased(const javelin::protocol::SettingsSnapshot& baseline,
+                      javelin::protocol::SettingsUpdate update);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         updateWorkspace(javelin::protocol::WorkspaceSettings workspace);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>

@@ -37,7 +37,13 @@ namespace javelin::gui::shell
             return;
         }
 
-        refreshConnection(m_settings.accountForCachedId(QString::fromStdString(accountId)));
+        auto connection = m_settings.accountForCachedId(QString::fromStdString(accountId));
+        if (connection.id.isEmpty())
+        {
+            Q_EMIT userInterventionRequired(i18n("This account is no longer configured."));
+            return;
+        }
+        refreshConnection(std::move(connection));
     }
 
     void

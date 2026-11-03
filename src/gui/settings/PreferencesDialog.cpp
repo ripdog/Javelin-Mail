@@ -260,10 +260,11 @@ namespace javelin::gui::settings
         javelin::app::DeveloperDiagnosticsPort& developerDiagnosticsPort,
         javelin::app::DeveloperMaintenancePort& developerMaintenancePort, QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr), m_settings(settings),
-          m_baseRevision(m_settings.snapshot().revision), m_accountCommandPort(accountCommandPort),
-          m_mailCommandPort(mailCommandPort), m_onboardingPort(onboardingPort),
-          m_translationService(translationService), m_accountReader(accountReader),
-          m_mailboxReader(mailboxReader), m_developerDiagnosticsPort(developerDiagnosticsPort),
+          m_baseRevision(m_settings.snapshot().revision), m_baseSettings(m_settings.snapshot()),
+          m_accountCommandPort(accountCommandPort), m_mailCommandPort(mailCommandPort),
+          m_onboardingPort(onboardingPort), m_translationService(translationService),
+          m_accountReader(accountReader), m_mailboxReader(mailboxReader),
+          m_developerDiagnosticsPort(developerDiagnosticsPort),
           m_developerMaintenancePort(developerMaintenancePort), m_accounts(m_settings.accounts()),
           m_remoteContentSenders(m_settings.remoteContentSenders()),
           m_remoteContentDomains(m_settings.remoteContentDomains()),
@@ -526,7 +527,7 @@ namespace javelin::gui::settings
         if (wizard.exec() != QDialog::Accepted)
             return;
 
-        m_baseRevision = m_settings.snapshot().revision;
+        rebaseOnCurrentSettings();
         m_accounts = m_settings.accounts();
         refreshAccountList();
         const auto added = std::ranges::find_if(m_accounts, [&existingIds](const auto& account)
@@ -594,7 +595,7 @@ namespace javelin::gui::settings
         if (wizard.exec() != QDialog::Accepted)
             return;
 
-        m_baseRevision = m_settings.snapshot().revision;
+        rebaseOnCurrentSettings();
         m_accounts = m_settings.accounts();
         refreshAccountList();
         const auto account = std::ranges::find(m_accounts, connectionId, &ConnectionSettings::id);
@@ -646,6 +647,24 @@ namespace javelin::gui::settings
     {
         m_hasPendingChanges = true;
         updateButtons();
+    }
+
+    void PreferencesDialog::rebaseOnCurrentSettings()
+    {
+        m_baseSettings = m_settings.snapshot();
+        m_baseRevision = m_baseSettings.revision;
+    }
+
+    std::optional<javelin::protocol::BoundaryError>
+    PreferencesDialog::submitSettingsUpdate(javelin::protocol::SettingsUpdate update)
+    {
+        // Settings the dialog does not edit, such as the saved window state, change while it is
+        // open and must not make an otherwise current save fail.
+        auto error = m_settings.update(m_baseRevision, update);
+        if (error.has_value() &&
+            error->code == javelin::protocol::BoundaryErrorCode::StaleSettingsRevision)
+            error = m_settings.updateRebased(m_baseSettings, std::move(update));
+        return error;
     }
 
     bool PreferencesDialog::saveCurrentSettings()
@@ -746,12 +765,17 @@ namespace javelin::gui::settings
         };
         update.undoSendDelaySeconds = m_undoSendDelaySeconds;
         update.undoSendUsesDialog = m_undoSendUsesDialog;
-        if (const auto error = m_settings.update(m_baseRevision, std::move(update)))
+        if (const auto error = submitSettingsUpdate(std::move(update)))
         {
-            QMessageBox::critical(this, i18n("Could not save preferences"), error->detail);
+            QMessageBox::critical(
+                this, i18n("Could not save preferences"),
+                error->code == javelin::protocol::BoundaryErrorCode::StaleSettingsRevision
+                    ? i18n("Settings that Preferences edits were changed elsewhere while it was "
+                           "open. Close Preferences and open it again, then repeat your changes.")
+                    : error->detail);
             return false;
         }
-        m_baseRevision = m_settings.snapshot().revision;
+        rebaseOnCurrentSettings();
 
         if (!visibilityChanges.empty())
         {
@@ -873,7 +897,7 @@ namespace javelin::gui::settings
                            });
         }
 
-        m_baseRevision = m_settings.snapshot().revision;
+        rebaseOnCurrentSettings();
         m_removedAccounts.clear();
         m_loadedAccountIds.clear();
         for (const auto& account : m_accounts)

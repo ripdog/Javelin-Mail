@@ -145,3 +145,83 @@ TEST_CASE("GUI settings ignore identical workspace updates", "[gui][settings][wo
     CHECK(settings.snapshot().revision.value == 4);
     CHECK(settings.workspaceSettings() == workspace);
 }
+
+namespace
+{
+    javelin::protocol::SettingsSnapshot preferencesSnapshot()
+    {
+        javelin::protocol::SettingsSnapshot snapshot;
+        snapshot.revision = {.value = 3};
+        javelin::protocol::AccountSettings account;
+        account.id = QStringLiteral("connection-1");
+        account.revision = 1;
+        snapshot.accounts.push_back(std::move(account));
+        snapshot.undoSendDelaySeconds = 10;
+        return snapshot;
+    }
+} // namespace
+
+TEST_CASE("a stale preferences update is rebased when only the workspace changed",
+          "[gui][settings][revision]")
+{
+    const auto baseline = preferencesSnapshot();
+    javelin::gui::settings::GuiSettings settings{baseline};
+
+    // The main window saves its geometry while Preferences is open.
+    auto workspace = settings.workspaceSettings();
+    workspace.mainWindowState = QByteArrayLiteral("window-state");
+    REQUIRE_FALSE(settings.updateWorkspace(std::move(workspace)).has_value());
+    REQUIRE(settings.snapshot().revision.value == 4);
+
+    javelin::protocol::SettingsUpdate update;
+    update.accounts = std::vector<javelin::protocol::AccountSettings>{};
+    update.undoSendDelaySeconds = 25;
+    REQUIRE(settings.update(baseline.revision, update).has_value());
+
+    REQUIRE_FALSE(settings.updateRebased(baseline, std::move(update)).has_value());
+    CHECK(settings.snapshot().accounts.empty());
+    CHECK(settings.undoSendDelaySeconds() == 25);
+    CHECK(settings.snapshot().workspace.mainWindowState == QByteArrayLiteral("window-state"));
+    CHECK(settings.snapshot().revision.value == 5);
+}
+
+TEST_CASE("a stale preferences update is refused when a section it replaces changed",
+          "[gui][settings][revision]")
+{
+    const auto baseline = preferencesSnapshot();
+    javelin::gui::settings::GuiSettings settings{baseline};
+
+    // The daemon marks the account as needing sign-in while Preferences is open.
+    auto accounts = settings.snapshot().accounts;
+    accounts.front().reauthenticationRequired = true;
+    javelin::protocol::SettingsUpdate daemonUpdate;
+    daemonUpdate.accounts = std::move(accounts);
+    REQUIRE_FALSE(settings.update(std::move(daemonUpdate)).has_value());
+
+    javelin::protocol::SettingsUpdate update;
+    update.accounts = std::vector<javelin::protocol::AccountSettings>{};
+    const auto error = settings.updateRebased(baseline, std::move(update));
+
+    REQUIRE(error.has_value());
+    CHECK(error->code == javelin::protocol::BoundaryErrorCode::StaleSettingsRevision);
+    REQUIRE(settings.snapshot().accounts.size() == 1);
+    CHECK(settings.snapshot().accounts.front().reauthenticationRequired);
+    CHECK(settings.snapshot().revision.value == 4);
+}
+
+TEST_CASE("a rebased preferences update ignores changes to sections it leaves alone",
+          "[gui][settings][revision]")
+{
+    const auto baseline = preferencesSnapshot();
+    javelin::gui::settings::GuiSettings settings{baseline};
+
+    javelin::protocol::SettingsUpdate other;
+    other.undoSendDelaySeconds = 30;
+    REQUIRE_FALSE(settings.update(std::move(other)).has_value());
+
+    javelin::protocol::SettingsUpdate update;
+    update.accounts = std::vector<javelin::protocol::AccountSettings>{};
+    REQUIRE_FALSE(settings.updateRebased(baseline, std::move(update)).has_value());
+    CHECK(settings.snapshot().accounts.empty());
+    CHECK(settings.undoSendDelaySeconds() == 30);
+}
