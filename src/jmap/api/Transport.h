@@ -7,6 +7,7 @@
 #include <QCoroTask>
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QIODevice>
 #include <QList>
 #include <QNetworkAccessManager>
@@ -15,8 +16,12 @@
 #include <QString>
 #include <QUrl>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -64,6 +69,11 @@ namespace javelin::jmap::api
         std::uint64_t size = 0;
     };
 
+    // Parses an RFC 9110 Retry-After value, which is either delay-seconds or an IMF-fixdate
+    // HTTP-date. A date in the past yields a zero delay.
+    [[nodiscard]] std::optional<std::chrono::seconds> parseRetryAfter(const QByteArray& value,
+                                                                      const QDateTime& now);
+
     using TransportResult = std::variant<HttpResponse, TransportError>;
     using FileTransportResult = std::variant<HttpFileResponse, TransportError>;
 
@@ -72,8 +82,10 @@ namespace javelin::jmap::api
       public:
         virtual ~AbstractTransport() = default;
 
-        virtual void invalidateConnections()
+        // Aborts in-flight requests authenticated as accountId and drops idle pooled connections.
+        virtual void invalidateConnections(std::string_view accountId)
         {
+            static_cast<void>(accountId);
         }
 
         [[nodiscard]] virtual QCoro::Task<TransportResult> send(HttpRequest request) = 0;
@@ -92,7 +104,7 @@ namespace javelin::jmap::api
 
         void setAccessTokenProvider(javelin::jmap::auth::AccessTokenProvider provider);
         void setRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
-        void invalidateConnections() override;
+        void invalidateConnections(std::string_view accountId) override;
 
         [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
         [[nodiscard]] QCoro::Task<TransportResult> sendFromFile(HttpRequest request,
@@ -115,7 +127,7 @@ namespace javelin::jmap::api
         explicit QtNetworkTransport(QNetworkAccessManager& networkAccessManager);
         ~QtNetworkTransport() override = default;
 
-        void invalidateConnections() override;
+        void invalidateConnections(std::string_view accountId) override;
 
         [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
         [[nodiscard]] QCoro::Task<TransportResult> sendFromFile(HttpRequest request,
@@ -128,7 +140,16 @@ namespace javelin::jmap::api
 
       private:
         QNetworkAccessManager& m_networkAccessManager;
-        std::vector<QPointer<QNetworkReply>> m_activeReplies;
+        struct ActiveReply
+        {
+            QPointer<QNetworkReply> reply;
+            std::string accountId;
+        };
+
+        void registerActiveReply(QNetworkReply* reply, const HttpRequest& request);
+        void unregisterActiveReply(const QNetworkReply* reply);
+
+        std::vector<ActiveReply> m_activeReplies;
     };
 
 } // namespace javelin::jmap::api

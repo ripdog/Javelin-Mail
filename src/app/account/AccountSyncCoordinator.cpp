@@ -19,6 +19,7 @@
 #include <QDebug>
 #include <QMetaObject>
 #include <QNetworkAccessManager>
+#include <QPointer>
 
 #include <chrono>
 #include <ranges>
@@ -161,6 +162,8 @@ namespace javelin::app
                     m_runContext->configuration.calendarCapable &&
                 updatedConfiguration->contactsCapable ==
                     m_runContext->configuration.contactsCapable &&
+                updatedConfiguration->identitiesCapable ==
+                    m_runContext->configuration.identitiesCapable &&
                 updatedConfiguration->groupwareAccountIds ==
                     m_runContext->configuration.groupwareAccountIds &&
                 updatedConfiguration->websocket.has_value() ==
@@ -181,6 +184,9 @@ namespace javelin::app
                 m_runContext->configuration.mailboxes = updatedConfiguration->mailboxes;
                 m_runContext->configuration.notificationMailboxIds =
                     updatedConfiguration->notificationMailboxIds;
+                // Refreshes read the limits from the run context for every request, so a server
+                // limit change applies without restarting the state-change worker.
+                m_runContext->configuration.requestLimits = updatedConfiguration->requestLimits;
                 if (!watchedMailboxesChanged && !notificationMailboxesChanged)
                 {
                     return;
@@ -528,6 +534,9 @@ namespace javelin::app
         if (runContext == nullptr || !hasValidSettings() || demand.empty())
             co_return;
 
+        // Account removal destroys this coordinator while refreshes may still be suspended on the
+        // network; every resumption must check that the coordinator is still alive.
+        const QPointer<AccountSyncCoordinator> self{this};
         if (m_refreshInFlight)
         {
             m_queuedRefreshDemand.merge(demand);
@@ -541,6 +550,8 @@ namespace javelin::app
         do
         {
             co_await refreshWatchedMailboxOnce(runContext, demand, retryLease);
+            if (!self)
+                co_return;
             runContext = m_runContext;
             if (runContext == nullptr || runContext->generation != generation ||
                 runContext->cancellation.isCancelled())
@@ -584,6 +595,7 @@ namespace javelin::app
             co_return;
         }
 
+        const QPointer<AccountSyncCoordinator> self{this};
         javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         const javelin::jmap::api::ApiRequestContext apiRequestContext{
             .credentials =
@@ -668,6 +680,8 @@ namespace javelin::app
                 const auto deltaResult = co_await deltaExecutor.refresh(
                     runContext->configuration.accountId, deltaRequest,
                     runContext->configuration.remoteAccountId, baselineForStep);
+                if (!self)
+                    co_return;
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&deltaResult))
                 {
                     qWarning().noquote() << "Account mail delta refresh failed" << error->message;
@@ -726,6 +740,8 @@ namespace javelin::app
                 const auto rebaselineResult = co_await deltaExecutor.rebaselineEmail(
                     runContext->configuration.accountId, emailRebaselineExpectedState,
                     runContext->configuration.remoteAccountId, notificationBaselineMailboxIds);
+                if (!self)
+                    co_return;
                 if (const auto* error =
                         std::get_if<javelin::jmap::OperationError>(&rebaselineResult))
                 {
@@ -780,7 +796,7 @@ namespace javelin::app
             if (mailboxFullRefreshNeeded)
             {
                 const auto mailboxState = co_await refreshMailboxStateOnce(runContext, retryLease);
-                if (!mailboxState.has_value())
+                if (!self || !mailboxState.has_value())
                     co_return;
                 endpointRequestSucceeded = true;
                 if (*mailboxState)
@@ -830,6 +846,8 @@ namespace javelin::app
                 continue;
             const auto refreshResult = co_await m_mailQueryRefreshPort.refreshCanonicalMailbox(
                 runContext->configuration.accountId, mailboxId);
+            if (!self)
+                co_return;
             if (std::holds_alternative<CanonicalMailboxRefreshSummary>(refreshResult))
             {
                 endpointRequestSucceeded = true;
@@ -881,6 +899,7 @@ namespace javelin::app
             co_return std::nullopt;
         }
 
+        const QPointer<AccountSyncCoordinator> self{this};
         javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         const javelin::jmap::api::ApiRequestContext apiRequestContext{
             .credentials =
@@ -903,6 +922,8 @@ namespace javelin::app
                                                                   methodCaller, apiRequestContext};
         const auto refreshResult = co_await executor.refresh(
             runContext->configuration.accountId, runContext->configuration.remoteAccountId);
+        if (!self)
+            co_return std::nullopt;
 
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
@@ -1218,11 +1239,14 @@ namespace javelin::app
         auto runContext = std::make_shared<RunContext>();
         runContext->generation = ++m_generation;
         runContext->configuration = *nextConfiguration;
+        // The worker reports a final Disconnected status after cancellation, which can happen after
+        // this coordinator has been destroyed.
+        const QPointer<AccountSyncCoordinator> self{this};
         const auto stateChangeStatusCallback =
-            [this, generation = runContext->generation](
+            [this, self, generation = runContext->generation](
                 const javelin::jmap::sync::StateChangeConnectionStatus status)
         {
-            if (m_runContext == nullptr || m_runContext->generation != generation)
+            if (!self || m_runContext == nullptr || m_runContext->generation != generation)
                 return;
 
             handleStateChangeStatus(status);
@@ -1255,11 +1279,11 @@ namespace javelin::app
         runContext->worker = std::make_unique<javelin::jmap::sync::StateChangeWorker>(
             *runContext->source, *this, runContext->sleeper, javelin::jmap::sync::BackoffPolicy{},
             stateChangeStatusCallback,
-            [this,
+            [this, self,
              generation = runContext->generation](const javelin::jmap::OperationError& error,
                                                   const std::size_t consecutiveTransientFailures)
             {
-                if (m_runContext == nullptr || m_runContext->generation != generation)
+                if (!self || m_runContext == nullptr || m_runContext->generation != generation)
                     return;
                 handleStateChangeError(QStringLiteral("Maintain account connection"), error,
                                        consecutiveTransientFailures);
@@ -1364,8 +1388,11 @@ namespace javelin::app
         QString operation, javelin::jmap::OperationError error, const std::size_t generation,
         std::string accountId, std::string rejectedAccessToken)
     {
+        const QPointer<AccountSyncCoordinator> self{this};
         auto refreshedAccessToken =
             co_await m_authenticationRefreshHandler(std::move(accountId), rejectedAccessToken);
+        if (!self)
+            co_return;
         m_authenticationRecoveryInFlight = false;
         if (refreshedAccessToken.has_value() && *refreshedAccessToken != rejectedAccessToken)
         {

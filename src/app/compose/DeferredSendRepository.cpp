@@ -293,6 +293,23 @@ namespace javelin::app
         return query.numRowsAffected() == 1;
     }
 
+    std::variant<bool, javelin::jmap::cache::DatabaseError>
+    DeferredSendRepository::rescheduleUndispatched(const QString& sendId, const QDateTime& dueAt,
+                                                   QString error)
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE pending_sends SET status='scheduled',due_at=:due_at,last_error=:error,"
+            "dispatch_started_at=NULL,updated_at=CURRENT_TIMESTAMP "
+            "WHERE send_id=:send_id AND status='dispatching'"));
+        query.bindValue(QStringLiteral(":due_at"), dueAt.toUTC().toString(Qt::ISODateWithMs));
+        query.bindValue(QStringLiteral(":error"), std::move(error));
+        query.bindValue(QStringLiteral(":send_id"), sendId);
+        if (!query.exec())
+            return queryError(QStringLiteral("Reschedule undispatched pending send"), query);
+        return query.numRowsAffected() == 1;
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
     DeferredSendRepository::markWaiting(const QString& sendId, const DeferredSendStatus status,
                                         QString error)

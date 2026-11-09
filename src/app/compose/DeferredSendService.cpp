@@ -18,6 +18,15 @@ namespace javelin::app
 {
     namespace
     {
+        constexpr qint64 undispatchedRetryDelayMilliseconds = 30000;
+
+        void logRepositoryError(const QString& operation, const QString& sendId,
+                                const std::optional<javelin::jmap::cache::DatabaseError>& error)
+        {
+            if (error.has_value())
+                qWarning().noquote() << operation << sendId << error->message;
+        }
+
         [[nodiscard]] javelin::jmap::LiveConnectionSettings
         liveSettings(const AccountConnectionSettings& settings)
         {
@@ -443,7 +452,8 @@ namespace javelin::app
         const auto settings = m_connectionProvider.connectionSettingsFor(send.accountId);
         if (!settings.has_value())
         {
-            static_cast<void>(
+            logRepositoryError(
+                QStringLiteral("Mark deferred send waiting for credentials:"), send.sendId,
                 m_repository.markWaiting(send.sendId, DeferredSendStatus::WaitingForAuth,
                                          i18n("Account credentials are unavailable.")));
             clearNotificationGate(send.sendId);
@@ -502,7 +512,25 @@ namespace javelin::app
                         ? DeferredSendStatus::WaitingForAuth
                         : DeferredSendStatus::WaitingForNetwork;
                 clearNotificationGate(send.sendId);
-                static_cast<void>(m_repository.markWaiting(send.sendId, waiting, error->message));
+                logRepositoryError(QStringLiteral("Mark deferred send waiting:"), send.sendId,
+                                   m_repository.markWaiting(send.sendId, waiting, error->message));
+                static_cast<void>(m_undoManager.setEntryStatus(
+                    send.historyEntryId, javelin::app::undo::HistoryEntryStatus::Ready));
+                Q_EMIT undoableSendWaiting(send.sendId, i18n("Waiting to send"),
+                                           sendLabel(send.subject));
+            }
+            else if (!dispatched && javelin::jmap::isTransientError(*error))
+            {
+                // Nothing reached the server, so a transient failure (including a busy local
+                // cache) retries the same send rather than failing it.
+                clearNotificationGate(send.sendId);
+                const auto rescheduled = m_repository.rescheduleUndispatched(
+                    send.sendId, now().addMSecs(undispatchedRetryDelayMilliseconds),
+                    error->message);
+                if (const auto* databaseError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&rescheduled))
+                    qWarning().noquote() << QStringLiteral("Reschedule deferred send:")
+                                         << send.sendId << databaseError->message;
                 static_cast<void>(m_undoManager.setEntryStatus(
                     send.historyEntryId, javelin::app::undo::HistoryEntryStatus::Ready));
                 Q_EMIT undoableSendWaiting(send.sendId, i18n("Waiting to send"),
@@ -514,12 +542,15 @@ namespace javelin::app
                       error->code == javelin::jmap::OperationErrorCode::ProtocolViolation))
             {
                 clearNotificationGate(send.sendId);
-                static_cast<void>(m_repository.markUnknown(send.sendId, error->message));
+                logRepositoryError(QStringLiteral("Mark deferred send outcome unknown:"),
+                                   send.sendId,
+                                   m_repository.markUnknown(send.sendId, error->message));
             }
             else
             {
                 clearNotificationGate(send.sendId);
-                static_cast<void>(m_repository.markFailed(send.sendId, error->message));
+                logRepositoryError(QStringLiteral("Mark deferred send failed:"), send.sendId,
+                                   m_repository.markFailed(send.sendId, error->message));
                 static_cast<void>(m_undoManager.forget(send.historyEntryId));
                 Q_EMIT sendFailed(send.sendId, error->message);
             }
@@ -527,7 +558,8 @@ namespace javelin::app
         }
         const auto& summary = std::get<javelin::jmap::submission::SendSummary>(submitted);
         clearNotificationGate(send.sendId);
-        static_cast<void>(m_repository.markSubmitted(send.sendId, summary.submissionId));
+        logRepositoryError(QStringLiteral("Mark deferred send submitted:"), send.sendId,
+                           m_repository.markSubmitted(send.sendId, summary.submissionId));
     }
 
     void DeferredSendService::clearNotificationGate(const QString& sendId)

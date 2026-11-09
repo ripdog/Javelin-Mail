@@ -39,11 +39,13 @@ namespace
       public:
         std::size_t calls = 0;
         std::size_t invalidations = 0;
+        std::string invalidatedAccountId;
         javelin::jmap::api::TransportResult result;
 
-        void invalidateConnections() override
+        void invalidateConnections(const std::string_view accountId) override
         {
             ++invalidations;
+            invalidatedAccountId = accountId;
         }
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
@@ -267,6 +269,7 @@ TEST_CASE("preferred JMAP transport invalidates HTTP connections when reachabili
     preferred.invalidateConnection("u1");
 
     CHECK(resourceTransport.invalidations == 1);
+    CHECK(resourceTransport.invalidatedAccountId == "u1");
 }
 
 TEST_CASE("JMAP request diagnostics resolve methods and human-readable mailbox names",

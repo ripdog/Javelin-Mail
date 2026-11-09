@@ -25,11 +25,20 @@ namespace javelin::app
         using LocalSearchResult = std::variant<std::vector<javelin::jmap::cache::MessageListItem>,
                                                javelin::jmap::cache::DatabaseError>;
 
-        struct WindowRequest
+        [[nodiscard]] std::vector<MessageListWindowRequest>
+        projectedWindowRequests(const std::vector<MessageListWindow>& windows)
         {
-            std::size_t offset = 0;
-            std::size_t limit = 0;
-        };
+            std::vector<MessageListWindowRequest> requests;
+            requests.reserve(windows.size());
+            for (const auto& window : windows)
+            {
+                requests.push_back({
+                    .offset = window.requestedOffset,
+                    .limit = window.requestedLimit,
+                });
+            }
+            return requests;
+        }
 
         using ProjectedSearchWindows =
             std::vector<std::optional<javelin::jmap::cache::SearchWindowPage>>;
@@ -59,7 +68,7 @@ namespace javelin::app
         [[nodiscard]] ProjectedSearchWindowsResult
         loadProjectedSearchWindows(const QString& databasePath, const std::string& accountId,
                                    const std::string& queryKey,
-                                   const std::vector<WindowRequest>& requests)
+                                   const std::vector<MessageListWindowRequest>& requests)
         {
             javelin::jmap::cache::ReadOnlyThreadConnectionFactory factory{
                 {.connectionNamePrefix = QStringLiteral("javelin-projected-search"),
@@ -527,15 +536,8 @@ namespace javelin::app
         if (m_windows.empty())
             resetOnlineWindows();
 
-        std::vector<WindowRequest> requests;
-        requests.reserve(m_windows.size());
-        for (const auto& window : m_windows)
-        {
-            requests.push_back({
-                .offset = window.requestedOffset,
-                .limit = window.requestedLimit,
-            });
-        }
+        auto requests = projectedWindowRequests(m_windows);
+        auto requestedWindows = requests;
 
         m_projectedReloadInFlight = true;
         const auto generation = m_generation;
@@ -543,7 +545,7 @@ namespace javelin::app
         auto* watcher = new QFutureWatcher<ProjectedSearchWindowsResult>(this);
         connect(
             watcher, &QFutureWatcher<ProjectedSearchWindowsResult>::finished, this,
-            [this, watcher, generation, ticket]
+            [this, watcher, generation, ticket, requestedWindows = std::move(requestedWindows)]
             {
                 auto result = watcher->result();
                 watcher->deleteLater();
@@ -553,6 +555,14 @@ namespace javelin::app
                 {
                     if (std::exchange(m_projectedReloadPending, false))
                         reloadProjectedWindows();
+                    return;
+                }
+                if (requestedWindows != projectedWindowRequests(m_windows))
+                {
+                    // Load more or a window reset changed the window set while this snapshot was
+                    // loading, so its pages no longer line up with the current windows.
+                    m_projectedReloadPending = false;
+                    reloadProjectedWindows();
                     return;
                 }
                 if (!m_refreshGeneration.install(ticket, m_cacheEpoch))
@@ -589,12 +599,6 @@ namespace javelin::app
                 }
 
                 auto windows = std::get<ProjectedSearchWindows>(std::move(result));
-                if (windows.size() != m_windows.size())
-                {
-                    m_state.stale = true;
-                    Q_EMIT stateChanged();
-                    return;
-                }
 
                 const auto pendingIt =
                     m_pendingLoadMoreOffset.has_value()

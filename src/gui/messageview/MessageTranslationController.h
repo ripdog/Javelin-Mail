@@ -87,6 +87,7 @@ namespace javelin::gui::messageview
         bool m_autoTranslateAttempted = false;
         bool m_translationWasAutomatic = false;
         bool m_languageDetectionStarted = false;
+        std::uint64_t m_languageDetectionToken = 0;
         std::optional<javelin::gui::translation::LanguageDetectionResult> m_languageDetection;
         bool m_shouldOfferTranslation = false;
     };

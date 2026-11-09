@@ -174,6 +174,7 @@ add_executable(javelin_jmap_protocol_tests
     jmap/RequestBuilderTest.cpp
     jmap/SessionClientTest.cpp
     jmap/SessionTest.cpp
+    jmap/TransportTest.cpp
 )
 target_link_libraries(javelin_jmap_protocol_tests
     PRIVATE

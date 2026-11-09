@@ -463,3 +463,45 @@ TEST_CASE("redo schedules a fresh notification window",
     dispatchNow(fixture.service);
     CHECK(fixture.submitter.attempts == 0);
 }
+
+TEST_CASE("a transient failure before dispatch reschedules the send instead of failing it",
+          "[app][deferred-send][service][retry]")
+{
+    Fixture fixture;
+    fixture.seed(QStringLiteral("busy"), DeferredSendStatus::Scheduled,
+                 fixture.currentTime.addSecs(-1));
+    fixture.submitter.invokeDispatched = false;
+    fixture.submitter.result = javelin::jmap::OperationError{
+        .code = javelin::jmap::OperationErrorCode::LocalStorageBusy,
+        .message = QStringLiteral("database is locked"),
+    };
+    int failures = 0;
+    QObject::connect(&fixture.service, &DeferredSendService::sendFailed, &fixture.service,
+                     [&failures] { ++failures; });
+
+    fixture.service.start();
+    dispatchNow(fixture.service);
+    CHECK(fixture.submitter.attempts == 1);
+    CHECK(failures == 0);
+    const auto rescheduled = requireSend(fixture.repository, QStringLiteral("busy"));
+    CHECK(rescheduled.status == DeferredSendStatus::Scheduled);
+    CHECK(rescheduled.dueAt > fixture.currentTime);
+    CHECK(rescheduled.lastError == std::optional<QString>{QStringLiteral("database is locked")});
+    CHECK_FALSE(rescheduled.dispatchStartedAt.has_value());
+
+    // The send is retried once it is due again, and the Undo entry was kept for it.
+    fixture.submitter.invokeDispatched = true;
+    fixture.submitter.result = javelin::jmap::submission::SendSummary{
+        .composeSessionId = "compose",
+        .accountId = "account",
+        .draftEmailId = "draft",
+        .submissionId = std::string{"submission"},
+        .acceptedRevision = 1,
+        .scheduled = false,
+    };
+    fixture.currentTime = rescheduled.dueAt;
+    dispatchNow(fixture.service);
+    CHECK(fixture.submitter.attempts == 2);
+    CHECK(requireSend(fixture.repository, QStringLiteral("busy")).status ==
+          DeferredSendStatus::Submitted);
+}

@@ -94,6 +94,7 @@ namespace javelin::gui::messageview
         m_autoTranslateAttempted = false;
         m_translationWasAutomatic = false;
         m_languageDetectionStarted = false;
+        ++m_languageDetectionToken;
         m_languageDetection.reset();
         m_shouldOfferTranslation = false;
         Q_EMIT stateChanged();
@@ -146,6 +147,7 @@ namespace javelin::gui::messageview
 
         m_languageDetectionStarted = true;
         const auto selectedEmailId = m_emailId;
+        const auto detectionToken = ++m_languageDetectionToken;
         auto* watcher =
             new QFutureWatcher<std::optional<javelin::gui::translation::LanguageDetectionResult>>{
                 this};
@@ -153,11 +155,14 @@ namespace javelin::gui::messageview
                 &QFutureWatcher<
                     std::optional<javelin::gui::translation::LanguageDetectionResult>>::finished,
                 this,
-                [this, watcher, selectedEmailId]
+                [this, watcher, selectedEmailId, detectionToken]
                 {
                     const auto detection = watcher->result();
                     watcher->deleteLater();
-                    if (m_emailId != selectedEmailId || !m_snapshot.has_value())
+                    // A reset or a restarted detection supersedes this result, even when the same
+                    // email is shown again.
+                    if (m_emailId != selectedEmailId ||
+                        detectionToken != m_languageDetectionToken || !m_snapshot.has_value())
                         return;
                     m_languageDetection = detection;
                     updateOfferState();

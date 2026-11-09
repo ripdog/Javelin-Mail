@@ -1005,8 +1005,7 @@ namespace javelin::jmap::api
 
     void HttpJmapMethodTransport::invalidateConnection(const std::string_view accountId)
     {
-        static_cast<void>(accountId);
-        m_transport.invalidateConnections();
+        m_transport.invalidateConnections(accountId);
     }
 
     QCoro::Task<JmapMethodTransportResult> HttpJmapMethodTransport::call(JmapMethodRequest request)

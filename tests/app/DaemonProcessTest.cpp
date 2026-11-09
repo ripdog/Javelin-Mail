@@ -726,6 +726,22 @@ TEST_CASE("daemon does not relaunch an auto-started GUI after bootstrap rejectio
     launches = file.readAll();
     CHECK(launches.count('\n') == 1);
     CHECK(process.pendingActivationCount() == 1);
+
+    // A new activation is a fresh request, so the failed launch does not block it.
+    process.enqueueActivation(
+        javelin::protocol::RaiseGuiRoute{.activationToken = QStringLiteral("second-token")});
+    for (int attempt = 0; attempt < 200; ++attempt)
+    {
+        QCoreApplication::processEvents();
+        QFile relaunches{launchesPath};
+        if (relaunches.open(QIODevice::ReadOnly))
+            launches = relaunches.readAll();
+        if (launches.count('\n') >= 2 && !process.hasGuiConnection())
+            break;
+        QThread::msleep(5);
+    }
+    CHECK(launches.count('\n') == 2);
+    CHECK(process.pendingActivationCount() == 2);
 }
 
 TEST_CASE("daemon does not queue vault metadata for undiscovered connection ids",

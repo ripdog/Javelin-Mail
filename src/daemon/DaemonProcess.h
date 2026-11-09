@@ -186,6 +186,7 @@ namespace javelin::app
         std::deque<javelin::protocol::ActivationRoute> m_pendingActivations;
         QTimer m_performanceTimer;
         QTimer m_oauthRefreshTimer;
+        QTimer m_guiLaunchTimeout;
         OAuthRefreshSingleFlight m_oauthRefreshes;
     };
 } // namespace javelin::app

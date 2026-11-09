@@ -1028,3 +1028,44 @@ TEST_CASE("mailbox infinite scrolling waits for correlated IPC after cache inval
     CHECK(session.state().items.size() == 4);
     CHECK_FALSE(session.canLoadMore());
 }
+
+TEST_CASE("mailbox cache reload reruns when load more changes the windows it loaded",
+          "[app][mailbox-session][infinite-scroll][ordering]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("mailbox-session-reload-window-shape-test"));
+    seedInfiniteScrollData(context.connection, true);
+    PendingMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::MailboxSession session{
+        "account-1", "mailbox-1",     QStringLiteral("Inbox"), std::optional<std::string>{"inbox"},
+        {},          context.queries, materialization,         2,
+        events};
+
+    session.loadCachedState();
+    waitFor([&] { return session.state().cacheLoaded; });
+    REQUIRE(session.state().items.size() == 2);
+
+    // The forced reload reads one window; load more adds a second before that read completes.
+    session.loadCachedState(true);
+    REQUIRE(session.loadMore());
+
+    waitFor([&] { return session.state().items.size() == 4; });
+    CHECK_FALSE(session.state().stale);
+    CHECK(session.state().loadMoreInFlight);
+
+    materialization.complete(javelin::app::MailboxWindowSummary{
+        .accountId = "account-1",
+        .mailboxId = "mailbox-1",
+        .offset = 2,
+        .limit = 2,
+        .position = 2,
+        .returnedLimit = 2,
+        .representativeCount = 2,
+        .total = 4,
+        .queryState = "state-1",
+    });
+    waitFor([&] { return !session.state().loadMoreInFlight; });
+    CHECK(session.state().loadMoreError.isEmpty());
+    CHECK(session.state().items.size() == 4);
+}

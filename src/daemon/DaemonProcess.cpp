@@ -112,6 +112,20 @@ namespace javelin::app
         m_oauthRefreshTimer.setInterval(60'000);
         connect(&m_oauthRefreshTimer, &QTimer::timeout, this,
                 &DaemonProcess::refreshOAuthCredentials);
+        // A launched GUI that never connects must not block later activations from launching one.
+        m_guiLaunchTimeout.setSingleShot(true);
+        m_guiLaunchTimeout.setInterval(60'000);
+        connect(&m_guiLaunchTimeout, &QTimer::timeout, this,
+                [this]
+                {
+                    if (m_guiConnected || !m_guiLaunchRequested)
+                        return;
+                    qWarning().noquote()
+                        << QStringLiteral("Launched GUI did not connect; the next activation will "
+                                          "launch it again")
+                        << m_options.guiExecutable;
+                    m_guiLaunchRequested = false;
+                });
     }
 
     DaemonProcess::~DaemonProcess()
@@ -248,6 +262,7 @@ namespace javelin::app
                 {
                     m_guiConnected = true;
                     m_guiReady = false;
+                    m_guiLaunchTimeout.stop();
                 });
         connect(m_endpoint.get(), &protocol::SocketDaemonEndpoint::connectionClosed, this,
                 &DaemonProcess::onSocketConnectionClosed);
@@ -281,6 +296,7 @@ namespace javelin::app
             return;
         m_performanceTimer.stop();
         m_oauthRefreshTimer.stop();
+        m_guiLaunchTimeout.stop();
         m_oauthRefreshes.cancel();
         if (m_services != nullptr)
             samplePerformance();
@@ -1360,7 +1376,9 @@ namespace javelin::app
             m_remoteActions->releaseGuiResources();
         m_guiConnected = false;
         m_guiReady = false;
-        m_guiLaunchRequested = suppressAutomaticRelaunch;
+        // Only the queued activations that the failed GUI was launched for are held back; a new
+        // activation is a fresh request and launches the GUI again.
+        m_guiLaunchRequested = false;
         m_cacheSuspend.reset();
         m_cacheAccessAcknowledged = false;
         if (suppressAutomaticRelaunch)
@@ -1411,6 +1429,7 @@ namespace javelin::app
             return;
         }
         m_guiLaunchRequested = true;
+        m_guiLaunchTimeout.start();
     }
 
     void DaemonProcess::requestShutdown()

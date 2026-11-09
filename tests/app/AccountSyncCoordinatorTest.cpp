@@ -16,6 +16,7 @@
 #include "jmap/sync/MailboxRefreshExecutor.h"
 
 #include <QCoroTask>
+#include <QCoroTimer>
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -23,6 +24,7 @@
 #include <QNetworkAccessManager>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -104,6 +106,9 @@ namespace
         bool nextEmailDeltaConfirmsUnknownMove = false;
         bool failPagedEmailContinuation = false;
         bool notificationCommittedBeforePresentation = false;
+        bool holdEmailDeltas = false;
+        std::size_t heldEmailDeltas = 0;
+        QTimer emailDeltaRelease;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest request) override
@@ -117,6 +122,16 @@ namespace
             const bool emailDelta = containsMethod(request, "Email/changes");
             const bool presentation = containsMethod(request, "Email/query") ||
                                       containsMethod(request, "Email/queryChanges");
+            if (emailDelta && holdEmailDeltas)
+            {
+                ++heldEmailDeltas;
+                if (!emailDeltaRelease.isActive())
+                {
+                    emailDeltaRelease.setSingleShot(true);
+                    emailDeltaRelease.start(std::chrono::hours{1});
+                }
+                co_await qCoro(emailDeltaRelease).waitForTimeout();
+            }
             if (emailDelta)
             {
                 ++emailDeltaAttempts;
@@ -378,7 +393,8 @@ namespace
         javelin::app::WorkScheduler workScheduler;
         CoordinatorQueryRefreshPort queryRefreshPort;
         javelin::app::EndpointRetryGate retryGate;
-        javelin::app::AccountSyncCoordinator coordinator;
+        std::unique_ptr<javelin::app::AccountSyncCoordinator> ownedCoordinator;
+        javelin::app::AccountSyncCoordinator& coordinator;
 
         CoordinatorFixture()
             : connection(openDatabase()), accounts(connection), mailboxes(connection),
@@ -387,8 +403,10 @@ namespace
               retryGate({.initialDelay = std::chrono::milliseconds{1},
                          .maxDelay = std::chrono::milliseconds{1},
                          .probePollInterval = std::chrono::milliseconds{1}}),
-              coordinator(connection, transport, networkAccessManager, cooldowns, accounts,
-                          mailboxes, workScheduler, queryRefreshPort, retryGate)
+              ownedCoordinator(std::make_unique<javelin::app::AccountSyncCoordinator>(
+                  connection, transport, networkAccessManager, cooldowns, accounts, mailboxes,
+                  workScheduler, queryRefreshPort, retryGate)),
+              coordinator(*ownedCoordinator)
         {
             transport.connection = &connection;
             seed();
@@ -405,7 +423,14 @@ namespace
 
         ~CoordinatorFixture()
         {
-            coordinator.stop();
+            if (ownedCoordinator != nullptr)
+                ownedCoordinator->stop();
+        }
+
+        // Mirrors account removal: the owner destroys the coordinator without stopping it first.
+        void destroyCoordinator()
+        {
+            ownedCoordinator.reset();
         }
 
       private:
@@ -920,4 +945,35 @@ TEST_CASE("lost account Email history reconciles every tracked mailbox query",
     const auto recovered = emails.find("account-1", "email-gap-new");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(recovered));
     CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(recovered).has_value());
+}
+
+TEST_CASE("destroying the coordinator during a mail refresh stops the suspended refresh",
+          "[app][account][sync][lifetime]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    CoordinatorFixture fixture;
+    REQUIRE(waitUntil(
+        [&fixture]
+        {
+            return fixture.transport.successfulEmailDeltas >= 1 &&
+                   fixture.transport.presentationRequests >= 1;
+        }));
+
+    fixture.transport.holdEmailDeltas = true;
+    REQUIRE(fixture.coordinator.requestSynchronization());
+    REQUIRE(waitUntil([&fixture] { return fixture.transport.heldEmailDeltas == 1; }));
+    const auto refreshCallsBeforeDestruction = fixture.queryRefreshPort.refreshCalls;
+    const auto successfulDeltasBeforeDestruction = fixture.transport.successfulEmailDeltas;
+
+    fixture.destroyCoordinator();
+    fixture.transport.holdEmailDeltas = false;
+    fixture.transport.emailDeltaRelease.start(0);
+
+    REQUIRE(waitUntil(
+        [&fixture, successfulDeltasBeforeDestruction]
+        { return fixture.transport.successfulEmailDeltas > successfulDeltasBeforeDestruction; }));
+    CHECK_FALSE(waitUntil(
+        [&fixture, refreshCallsBeforeDestruction]
+        { return fixture.queryRefreshPort.refreshCalls > refreshCallsBeforeDestruction; }, 200));
 }

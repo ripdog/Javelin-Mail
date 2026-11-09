@@ -117,12 +117,19 @@ namespace javelin::protocol
         const QScopedValueRollback callbackGuard{m_inSocketCallback, true};
         if (m_socket == nullptr)
             return;
+        // A connection that is being retired accepts no further requests from the peer.
+        if (m_closeAfterWrites || m_disconnectScheduled)
+        {
+            static_cast<void>(m_socket->readAll());
+            return;
+        }
         if (const auto error = m_decoder.append(m_socket->readAll()))
         {
             sendProtocolError(0, *error);
             return;
         }
-        while (m_socket != nullptr && !m_processingFrame)
+        while (m_socket != nullptr && !m_processingFrame && !m_closeAfterWrites &&
+               !m_disconnectScheduled)
         {
             auto decoded = m_decoder.takeFrame();
             if (auto* error = std::get_if<SocketFrameError>(&decoded))
@@ -509,8 +516,9 @@ namespace javelin::protocol
                                    m_options.maximumQueuedFrames ||
                                m_queuedBytes + static_cast<std::size_t>(frame.data.size()) >
                                    m_options.maximumQueuedBytes;
+        // Settings revisions are not dropped: a peer that missed one would keep editing against a
+        // stale revision, so an overflow disconnects it and reconnection reloads settings.
         if (queueFull && (std::holds_alternative<DaemonStatusChanged>(event) ||
-                          std::holds_alternative<SettingsUpdated>(event) ||
                           std::holds_alternative<DaemonLogEntries>(event)))
             return true;
         return enqueue(std::move(frame));

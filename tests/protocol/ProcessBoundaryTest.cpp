@@ -22,6 +22,7 @@
 #include <functional>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -1448,6 +1449,36 @@ TEST_CASE("socket endpoint rejects malformed peers and classifies lost replies",
     CHECK(std::get<std::optional<SocketFrame>>(malformedPeerReply)->kind ==
           SocketFrameKind::ProtocolError);
     malformedPeer.abort();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    // Frames that arrive behind a protocol violation are not handled once the close is pending.
+    QLocalSocket pipeliningPeer;
+    pipeliningPeer.connectToServer(options.socketPath);
+    REQUIRE(pipeliningPeer.waitForConnected(2000));
+    const auto followingPing = encodeSocketFrame(SocketFrameKind::PingRequest, 3, {});
+    REQUIRE(std::holds_alternative<QByteArray>(followingPing));
+    const auto pipelined = invalidCommandFrame + std::get<QByteArray>(followingPing);
+    REQUIRE(pipeliningPeer.write(pipelined) == pipelined.size());
+    QByteArray pipelinedReplies;
+    while (pipeliningPeer.state() == QLocalSocket::ConnectedState &&
+           pipeliningPeer.waitForReadyRead(2000))
+        pipelinedReplies += pipeliningPeer.readAll();
+    pipelinedReplies += pipeliningPeer.readAll();
+    CHECK(pipeliningPeer.state() != QLocalSocket::ConnectedState);
+    SocketFrameDecoder pipelinedDecoder;
+    REQUIRE_FALSE(pipelinedDecoder.append(pipelinedReplies).has_value());
+    std::vector<SocketFrameKind> pipelinedKinds;
+    while (true)
+    {
+        auto decoded = pipelinedDecoder.takeFrame();
+        REQUIRE(std::holds_alternative<std::optional<SocketFrame>>(decoded));
+        auto& frame = std::get<std::optional<SocketFrame>>(decoded);
+        if (!frame.has_value())
+            break;
+        pipelinedKinds.push_back(frame->kind);
+    }
+    CHECK(pipelinedKinds == std::vector<SocketFrameKind>{SocketFrameKind::ProtocolError});
+    pipeliningPeer.abort();
     QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
     SocketDaemonClient client{options};

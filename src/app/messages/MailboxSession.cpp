@@ -23,11 +23,20 @@ namespace javelin::app
 {
     namespace
     {
-        struct WindowRequest
+        [[nodiscard]] std::vector<MessageListWindowRequest>
+        projectedWindowRequests(const std::vector<MessageListWindow>& windows)
         {
-            std::size_t offset = 0;
-            std::size_t limit = 0;
-        };
+            std::vector<MessageListWindowRequest> requests;
+            requests.reserve(windows.size());
+            for (const auto& window : windows)
+            {
+                requests.push_back({
+                    .offset = window.requestedOffset,
+                    .limit = window.requestedLimit,
+                });
+            }
+            return requests;
+        }
 
         struct ProjectedMailboxSnapshot
         {
@@ -40,7 +49,7 @@ namespace javelin::app
 
         [[nodiscard]] ProjectedMailboxSnapshotResult loadProjectedMailboxWindows(
             const QString& databasePath, const std::string& accountId, const std::string& mailboxId,
-            const std::string& queryKey, const std::vector<WindowRequest>& requests,
+            const std::string& queryKey, const std::vector<MessageListWindowRequest>& requests,
             const javelin::jmap::query::EmailListSort sort, const bool searchWindows,
             const std::optional<std::string>& continuityEmailId,
             const std::optional<std::string>& continuityThreadId)
@@ -350,15 +359,8 @@ namespace javelin::app
         if (m_windows.empty())
             resetToInitialWindow();
 
-        std::vector<WindowRequest> requests;
-        requests.reserve(m_windows.size());
-        for (const auto& window : m_windows)
-        {
-            requests.push_back({
-                .offset = window.requestedOffset,
-                .limit = window.requestedLimit,
-            });
-        }
+        auto requests = projectedWindowRequests(m_windows);
+        auto requestedWindows = requests;
 
         m_projectedReloadInFlight = true;
         const auto generation = m_generation;
@@ -368,7 +370,8 @@ namespace javelin::app
         auto* watcher = new QFutureWatcher<ProjectedMailboxSnapshotResult>(this);
         connect(
             watcher, &QFutureWatcher<ProjectedMailboxSnapshotResult>::finished, this,
-            [this, watcher, generation, ticket, continuityEmailId, continuityThreadId]
+            [this, watcher, generation, ticket, continuityEmailId, continuityThreadId,
+             requestedWindows = std::move(requestedWindows)]
             {
                 auto result = watcher->result();
                 watcher->deleteLater();
@@ -380,6 +383,14 @@ namespace javelin::app
                 {
                     if (std::exchange(m_projectedReloadPending, false))
                         reloadProjectedWindows();
+                    return;
+                }
+                if (requestedWindows != projectedWindowRequests(m_windows))
+                {
+                    // Load more or a window reset changed the window set while this snapshot was
+                    // loading, so its pages no longer line up with the current windows.
+                    m_projectedReloadPending = false;
+                    reloadProjectedWindows();
                     return;
                 }
                 if (!m_refreshGeneration.install(ticket, m_cacheEpoch))
@@ -414,12 +425,6 @@ namespace javelin::app
 
                 auto snapshot = std::get<ProjectedMailboxSnapshot>(std::move(result));
                 auto& windows = snapshot.windows;
-                if (windows.size() != m_windows.size())
-                {
-                    m_state.stale = true;
-                    Q_EMIT stateChanged();
-                    return;
-                }
 
                 bool allCurrent = true;
                 for (std::size_t index = 0; index < windows.size(); ++index)

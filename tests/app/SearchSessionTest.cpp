@@ -719,3 +719,47 @@ TEST_CASE("online search exposes visible Thread materialization progress",
                     .error = {}});
     CHECK_FALSE(session.state().threadMaterializationInFlight);
 }
+
+TEST_CASE("online search cache reload reruns when load more changes the windows it loaded",
+          "[app][search-session][infinite-scroll][ordering]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-reload-window-shape-test"));
+    seedSearchData(context.connection, true);
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1",
+        {.from = "sender@example.test"},
+        {},
+        context.queries,
+        materialization,
+        events,
+        2,
+        javelin::app::RestoredSearchState{
+            .mode = javelin::app::SearchMode::Online,
+            .sessionId = "test-session",
+            .windows = {{.offset = 0, .limit = 2}},
+        },
+    };
+
+    session.loadCachedState();
+    waitFor([&] { return session.state().cacheLoaded; });
+    REQUIRE(session.state().items.size() == 2);
+    waitFor([&] { return materialization.lastSearchIntent.has_value(); });
+    // Fail the prefetch so load more adds its own window instead of waiting for the prefetch.
+    materialization.complete(javelin::jmap::OperationError{
+        .message = QStringLiteral("prefetch unavailable"),
+    });
+    QElapsedTimer settle;
+    settle.start();
+    waitFor([&] { return settle.elapsed() >= 50; });
+
+    // The forced reload reads one window; load more adds a second before that read completes.
+    session.loadCachedState(true);
+    REQUIRE(session.loadMore());
+
+    waitFor([&] { return session.state().items.size() == 4; });
+    CHECK_FALSE(session.state().stale);
+    CHECK(session.state().items[3].emailId == "email-4");
+}

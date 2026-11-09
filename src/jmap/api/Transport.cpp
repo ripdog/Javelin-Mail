@@ -11,13 +11,16 @@
 
 #include <QDebug>
 #include <QFile>
+#include <QLocale>
 #include <QLoggingCategory>
 #include <QMetaObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QScopeGuard>
+#include <QTimeZone>
 
+#include <algorithm>
 #include <chrono>
 
 namespace javelin::jmap::api
@@ -42,12 +45,10 @@ namespace javelin::jmap::api
 
         [[nodiscard]] std::optional<std::chrono::seconds> retryAfter(QNetworkReply& reply)
         {
-            bool parsed = false;
-            const auto seconds =
-                reply.rawHeader(QByteArrayLiteral("Retry-After")).toLongLong(&parsed);
-            if (!parsed || seconds < 0)
+            if (!reply.hasRawHeader(QByteArrayLiteral("Retry-After")))
                 return std::nullopt;
-            return std::chrono::seconds{seconds};
+            return parseRetryAfter(reply.rawHeader(QByteArrayLiteral("Retry-After")),
+                                   QDateTime::currentDateTimeUtc());
         }
 
         template <typename Response>
@@ -188,9 +189,9 @@ namespace javelin::jmap::api
         m_refreshHandler = std::move(handler);
     }
 
-    void RefreshingTransport::invalidateConnections()
+    void RefreshingTransport::invalidateConnections(const std::string_view accountId)
     {
-        m_transport.invalidateConnections();
+        m_transport.invalidateConnections(accountId);
     }
 
     QCoro::Task<TransportResult> RefreshingTransport::send(HttpRequest request)
@@ -368,15 +369,46 @@ namespace javelin::jmap::api
         co_return co_await m_transport.sendToFile(std::move(retryRequest), std::move(filePath));
     }
 
+    std::optional<std::chrono::seconds> parseRetryAfter(const QByteArray& value,
+                                                        const QDateTime& now)
+    {
+        const auto trimmed = value.trimmed();
+        bool parsed = false;
+        const auto seconds = trimmed.toLongLong(&parsed);
+        if (parsed)
+        {
+            if (seconds < 0)
+                return std::nullopt;
+            return std::chrono::seconds{seconds};
+        }
+
+        auto date = QLocale::c().toDateTime(QString::fromLatin1(trimmed),
+                                            QStringLiteral("ddd, dd MMM yyyy hh:mm:ss 'GMT'"));
+        if (!date.isValid())
+            return std::nullopt;
+        date.setTimeZone(QTimeZone::UTC);
+        return std::chrono::seconds{std::max<qint64>(0, now.secsTo(date))};
+    }
+
     QtNetworkTransport::QtNetworkTransport(QNetworkAccessManager& networkAccessManager)
         : m_networkAccessManager(networkAccessManager)
     {
     }
 
-    void QtNetworkTransport::invalidateConnections()
+    void QtNetworkTransport::invalidateConnections(const std::string_view accountId)
     {
+        // Other accounts may share this transport; only this account's requests are interrupted.
         std::vector<QPointer<QNetworkReply>> activeReplies;
-        activeReplies.swap(m_activeReplies);
+        std::erase_if(m_activeReplies,
+                      [accountId, &activeReplies](const ActiveReply& active)
+                      {
+                          if (active.reply.isNull())
+                              return true;
+                          if (active.accountId != accountId)
+                              return false;
+                          activeReplies.push_back(active.reply);
+                          return true;
+                      });
         for (const auto& reply : activeReplies)
         {
             if (auto* activeReply = reply.data(); activeReply != nullptr)
@@ -388,7 +420,25 @@ namespace javelin::jmap::api
                 activeReply->abort();
             }
         }
-        m_networkAccessManager.clearConnectionCache();
+        // Clearing the pool cancels every in-flight request on the network access manager, so it
+        // waits until the last remaining request has finished or been invalidated.
+        if (m_activeReplies.empty())
+            m_networkAccessManager.clearConnectionCache();
+    }
+
+    void QtNetworkTransport::registerActiveReply(QNetworkReply* reply, const HttpRequest& request)
+    {
+        m_activeReplies.push_back({
+            .reply = reply,
+            .accountId = request.authentication.has_value() ? request.authentication->accountId
+                                                            : std::string{},
+        });
+    }
+
+    void QtNetworkTransport::unregisterActiveReply(const QNetworkReply* reply)
+    {
+        std::erase_if(m_activeReplies, [reply](const ActiveReply& active)
+                      { return active.reply.isNull() || active.reply.data() == reply; });
     }
 
     QCoro::Task<TransportResult> QtNetworkTransport::send(HttpRequest request)
@@ -422,13 +472,8 @@ namespace javelin::jmap::api
             reply = m_networkAccessManager.post(networkRequest, request.body);
             break;
         }
-        m_activeReplies.emplace_back(reply);
-        const auto unregisterReply = qScopeGuard(
-            [this, reply]()
-            {
-                std::erase_if(m_activeReplies, [reply](const QPointer<QNetworkReply>& active)
-                              { return active.isNull() || active.data() == reply; });
-            });
+        registerActiveReply(reply, request);
+        const auto unregisterReply = qScopeGuard([this, reply]() { unregisterActiveReply(reply); });
         static_cast<void>(unregisterReply);
         if (request.dispatched)
             request.dispatched();
@@ -545,13 +590,8 @@ namespace javelin::jmap::api
             << static_cast<qulonglong>(contentLength);
 
         QNetworkReply* reply = m_networkAccessManager.post(networkRequest, &device);
-        m_activeReplies.emplace_back(reply);
-        const auto unregisterReply = qScopeGuard(
-            [this, reply]()
-            {
-                std::erase_if(m_activeReplies, [reply](const QPointer<QNetworkReply>& active)
-                              { return active.isNull() || active.data() == reply; });
-            });
+        registerActiveReply(reply, request);
+        const auto unregisterReply = qScopeGuard([this, reply]() { unregisterActiveReply(reply); });
         static_cast<void>(unregisterReply);
         if (request.dispatched)
             request.dispatched();
@@ -651,13 +691,8 @@ namespace javelin::jmap::api
             break;
         }
         reply->setReadBufferSize(256 * 1024);
-        m_activeReplies.emplace_back(reply);
-        const auto unregisterReply = qScopeGuard(
-            [this, reply]()
-            {
-                std::erase_if(m_activeReplies, [reply](const QPointer<QNetworkReply>& active)
-                              { return active.isNull() || active.data() == reply; });
-            });
+        registerActiveReply(reply, request);
+        const auto unregisterReply = qScopeGuard([this, reply]() { unregisterActiveReply(reply); });
         static_cast<void>(unregisterReply);
         if (request.dispatched)
             request.dispatched();
