@@ -116,6 +116,14 @@ namespace javelin::jmap::api
                                                                   QString filePath) override;
 
       private:
+        // Dispatches request with the current access token and, when the server rejects it with
+        // 401 and the refresh handler yields a different token, dispatches it once more.
+        // prepareRetry may veto the retry with an error, for example when a body cannot rewind.
+        template <typename Result, typename Dispatch, typename PrepareRetry>
+        [[nodiscard]] QCoro::Task<Result> sendWithAuthenticationRetry(HttpRequest request,
+                                                                      Dispatch dispatch,
+                                                                      PrepareRetry prepareRetry);
+
         AbstractTransport& m_transport;
         javelin::jmap::auth::AccessTokenProvider m_accessTokenProvider;
         javelin::jmap::auth::AccessTokenRefreshHandler m_refreshHandler;

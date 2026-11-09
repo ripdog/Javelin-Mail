@@ -87,6 +87,11 @@ namespace javelin::jmap::api
             request.authentication->accessToken = accessToken;
         }
 
+        [[nodiscard]] std::optional<TransportError> retryNeedsNoPreparation()
+        {
+            return std::nullopt;
+        }
+
         [[nodiscard]] TransportError mapReplyError(QNetworkReply& reply)
         {
             if (reply.property(networkInvalidatedProperty).toBool())
@@ -194,7 +199,10 @@ namespace javelin::jmap::api
         m_transport.invalidateConnections(accountId);
     }
 
-    QCoro::Task<TransportResult> RefreshingTransport::send(HttpRequest request)
+    template <typename Result, typename Dispatch, typename PrepareRetry>
+    QCoro::Task<Result> RefreshingTransport::sendWithAuthenticationRetry(HttpRequest request,
+                                                                         Dispatch dispatch,
+                                                                         PrepareRetry prepareRetry)
     {
         if (request.authentication.has_value() && m_accessTokenProvider)
         {
@@ -208,7 +216,7 @@ namespace javelin::jmap::api
         }
 
         auto retryRequest = request;
-        auto result = co_await m_transport.send(std::move(request));
+        Result result = co_await dispatch(std::move(request));
         if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||
             !m_refreshHandler)
         {
@@ -219,154 +227,70 @@ namespace javelin::jmap::api
         auto refreshedAccessToken =
             co_await m_refreshHandler(retryRequest.authentication->accountId, rejectedAccessToken);
         if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
-        {
             co_return result;
-        }
         if (retryRequest.cancellation.isCancellationRequested())
         {
             co_return TransportError{
                 .code = TransportErrorCode::Cancelled,
                 .message = "HTTP request cancelled while refreshing authentication",
                 .httpStatus = std::nullopt,
+                .networkError = std::nullopt,
+                .retryAfter = std::nullopt,
             };
         }
+        if (auto error = prepareRetry())
+            co_return std::move(*error);
 
         replaceBearerToken(retryRequest, *refreshedAccessToken);
         retryRequest.dispatched = {};
-        co_return co_await m_transport.send(std::move(retryRequest));
+        co_return co_await dispatch(std::move(retryRequest));
+    }
+
+    QCoro::Task<TransportResult> RefreshingTransport::send(HttpRequest request)
+    {
+        return sendWithAuthenticationRetry<TransportResult>(
+            std::move(request), [this](HttpRequest attempt)
+            { return m_transport.send(std::move(attempt)); }, retryNeedsNoPreparation);
     }
 
     QCoro::Task<TransportResult> RefreshingTransport::sendFromFile(HttpRequest request,
                                                                    QString filePath)
     {
-        if (request.authentication.has_value() && m_accessTokenProvider)
-        {
-            const auto currentAccessToken =
-                m_accessTokenProvider(request.authentication->accountId);
-            if (currentAccessToken.has_value() &&
-                *currentAccessToken != request.authentication->accessToken)
-            {
-                replaceBearerToken(request, *currentAccessToken);
-            }
-        }
-
-        auto retryRequest = request;
-        auto result = co_await m_transport.sendFromFile(std::move(request), filePath);
-        if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||
-            !m_refreshHandler)
-        {
-            co_return result;
-        }
-
-        const auto rejectedAccessToken = retryRequest.authentication->accessToken;
-        auto refreshedAccessToken =
-            co_await m_refreshHandler(retryRequest.authentication->accountId, rejectedAccessToken);
-        if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
-            co_return result;
-        if (retryRequest.cancellation.isCancellationRequested())
-        {
-            co_return TransportError{
-                .code = TransportErrorCode::Cancelled,
-                .message = "HTTP request cancelled while refreshing authentication",
-                .httpStatus = std::nullopt,
-            };
-        }
-
-        replaceBearerToken(retryRequest, *refreshedAccessToken);
-        retryRequest.dispatched = {};
-        co_return co_await m_transport.sendFromFile(std::move(retryRequest), std::move(filePath));
+        return sendWithAuthenticationRetry<TransportResult>(
+            std::move(request), [this, filePath = std::move(filePath)](HttpRequest attempt)
+            { return m_transport.sendFromFile(std::move(attempt), filePath); },
+            retryNeedsNoPreparation);
     }
 
     QCoro::Task<TransportResult>
     RefreshingTransport::sendFromDevice(HttpRequest request, QIODevice& device,
                                         const std::uint64_t contentLength)
     {
-        if (request.authentication.has_value() && m_accessTokenProvider)
-        {
-            const auto currentAccessToken =
-                m_accessTokenProvider(request.authentication->accountId);
-            if (currentAccessToken.has_value() &&
-                *currentAccessToken != request.authentication->accessToken)
-                replaceBearerToken(request, *currentAccessToken);
-        }
-
-        const auto initialPosition = device.pos();
-        auto retryRequest = request;
-        auto result =
-            co_await m_transport.sendFromDevice(std::move(request), device, contentLength);
-        if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||
-            !m_refreshHandler)
-            co_return result;
-
-        const auto rejectedAccessToken = retryRequest.authentication->accessToken;
-        auto refreshedAccessToken =
-            co_await m_refreshHandler(retryRequest.authentication->accountId, rejectedAccessToken);
-        if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
-            co_return result;
-        if (retryRequest.cancellation.isCancellationRequested())
-        {
-            co_return TransportError{
-                .code = TransportErrorCode::Cancelled,
-                .message = "HTTP request cancelled while refreshing authentication",
-                .httpStatus = std::nullopt,
-            };
-        }
-        if (!device.seek(initialPosition))
-        {
-            co_return TransportError{
-                .code = TransportErrorCode::LocalIoFailure,
-                .message = "Could not rewind streamed HTTP request body for authentication retry",
-                .httpStatus = std::nullopt,
-            };
-        }
-
-        replaceBearerToken(retryRequest, *refreshedAccessToken);
-        retryRequest.dispatched = {};
-        co_return co_await m_transport.sendFromDevice(std::move(retryRequest), device,
-                                                      contentLength);
+        return sendWithAuthenticationRetry<TransportResult>(
+            std::move(request), [this, &device, contentLength](HttpRequest attempt)
+            { return m_transport.sendFromDevice(std::move(attempt), device, contentLength); },
+            [&device, initialPosition = device.pos()]() -> std::optional<TransportError>
+            {
+                if (device.seek(initialPosition))
+                    return std::nullopt;
+                return TransportError{
+                    .code = TransportErrorCode::LocalIoFailure,
+                    .message =
+                        "Could not rewind streamed HTTP request body for authentication retry",
+                    .httpStatus = std::nullopt,
+                    .networkError = std::nullopt,
+                    .retryAfter = std::nullopt,
+                };
+            });
     }
 
     QCoro::Task<FileTransportResult> RefreshingTransport::sendToFile(HttpRequest request,
                                                                      QString filePath)
     {
-        if (request.authentication.has_value() && m_accessTokenProvider)
-        {
-            const auto currentAccessToken =
-                m_accessTokenProvider(request.authentication->accountId);
-            if (currentAccessToken.has_value() &&
-                *currentAccessToken != request.authentication->accessToken)
-            {
-                replaceBearerToken(request, *currentAccessToken);
-            }
-        }
-
-        auto retryRequest = request;
-        auto result = co_await m_transport.sendToFile(std::move(request), filePath);
-        if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||
-            !m_refreshHandler)
-        {
-            co_return result;
-        }
-
-        const auto rejectedAccessToken = retryRequest.authentication->accessToken;
-        auto refreshedAccessToken =
-            co_await m_refreshHandler(retryRequest.authentication->accountId, rejectedAccessToken);
-        if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
-        {
-            co_return result;
-        }
-        if (retryRequest.cancellation.isCancellationRequested())
-        {
-            co_return TransportError{
-                .code = TransportErrorCode::Cancelled,
-                .message = "HTTP request cancelled while refreshing authentication",
-                .httpStatus = std::nullopt,
-            };
-        }
-
-        replaceBearerToken(retryRequest, *refreshedAccessToken);
-        retryRequest.dispatched = {};
-        co_return co_await m_transport.sendToFile(std::move(retryRequest), std::move(filePath));
+        return sendWithAuthenticationRetry<FileTransportResult>(
+            std::move(request), [this, filePath = std::move(filePath)](HttpRequest attempt)
+            { return m_transport.sendToFile(std::move(attempt), filePath); },
+            retryNeedsNoPreparation);
     }
 
     std::optional<std::chrono::seconds> parseRetryAfter(const QByteArray& value,
