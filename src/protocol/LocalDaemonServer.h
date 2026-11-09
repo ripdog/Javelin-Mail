@@ -81,9 +81,9 @@ namespace javelin::protocol
         bool m_processingFrame = false;
         bool m_inSocketCallback = false;
         bool m_disconnectScheduled = false;
-        bool m_closeAfterWrites = false;
-        SocketDisconnectReason m_closeReason = SocketDisconnectReason::None;
-        QString m_closeDetail;
+        // Set once the connection is being retired: queued replies are still written, then the
+        // connection closes with this outcome and no further requests are read.
+        std::optional<SocketTransportError> m_closeAfterWrites;
         std::optional<SocketTransportError> m_lastError;
     };
 } // namespace javelin::protocol

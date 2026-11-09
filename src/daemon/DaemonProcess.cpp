@@ -118,13 +118,13 @@ namespace javelin::app
         connect(&m_guiLaunchTimeout, &QTimer::timeout, this,
                 [this]
                 {
-                    if (m_guiConnected || !m_guiLaunchRequested)
+                    if (m_gui != GuiState::Launching)
                         return;
                     qWarning().noquote()
                         << QStringLiteral("Launched GUI did not connect; the next activation will "
                                           "launch it again")
                         << m_options.guiExecutable;
-                    m_guiLaunchRequested = false;
+                    m_gui = GuiState::Absent;
                 });
     }
 
@@ -260,8 +260,8 @@ namespace javelin::app
         connect(m_endpoint.get(), &protocol::SocketDaemonEndpoint::connectionOpened, this,
                 [this]
                 {
-                    m_guiConnected = true;
-                    m_guiReady = false;
+                    m_gui = m_gui == GuiState::Launching ? GuiState::BootstrappingLaunched
+                                                         : GuiState::Bootstrapping;
                     m_guiLaunchTimeout.stop();
                 });
         connect(m_endpoint.get(), &protocol::SocketDaemonEndpoint::connectionClosed, this,
@@ -306,14 +306,7 @@ namespace javelin::app
             m_background->stop();
             m_background.reset();
         }
-        if (m_cacheAccessAcknowledged && m_services != nullptr)
-        {
-            if (const auto error = m_services->cacheAccessBarrier().resume())
-                qWarning().noquote()
-                    << QStringLiteral("Cache barrier resume during daemon stop:") << error->message;
-        }
-        m_cacheSuspend.reset();
-        m_cacheAccessAcknowledged = false;
+        releaseCacheSuspension(QStringLiteral("during daemon stop"));
         if (m_endpoint != nullptr)
         {
             publishStatus();
@@ -327,9 +320,7 @@ namespace javelin::app
         m_remoteActions.reset();
         m_services.reset();
         m_settingsRepository.reset();
-        m_guiConnected = false;
-        m_guiReady = false;
-        m_guiLaunchRequested = false;
+        m_gui = GuiState::Absent;
         m_pendingActivations.clear();
         if (m_instanceLock != nullptr)
         {
@@ -345,12 +336,30 @@ namespace javelin::app
 
     bool DaemonProcess::hasGuiConnection() const
     {
-        return m_guiConnected;
+        return guiConnected();
+    }
+
+    bool DaemonProcess::guiConnected() const
+    {
+        return m_gui == GuiState::BootstrappingLaunched || m_gui == GuiState::Bootstrapping ||
+               m_gui == GuiState::Ready;
+    }
+
+    void DaemonProcess::releaseCacheSuspension(const QString& context)
+    {
+        if (m_cacheSuspension.has_value() &&
+            m_cacheSuspension->phase == CacheSuspension::Phase::Suspended && m_services != nullptr)
+        {
+            if (const auto error = m_services->cacheAccessBarrier().resume())
+                qWarning().noquote()
+                    << QStringLiteral("Cache barrier resume %1:").arg(context) << error->message;
+        }
+        m_cacheSuspension.reset();
     }
 
     void DaemonProcess::enqueueActivation(protocol::ActivationRoute route)
     {
-        if (m_guiConnected && m_guiReady)
+        if (m_gui == GuiState::Ready)
         {
             onBoundaryEvent(protocol::ActivationRequested{.route = std::move(route)});
             return;
@@ -363,7 +372,7 @@ namespace javelin::app
             m_pendingActivations.pop_front();
         }
         m_pendingActivations.push_back(std::move(route));
-        if (!m_guiConnected)
+        if (!guiConnected())
             launchGuiIfNeeded();
     }
 
@@ -406,27 +415,30 @@ namespace javelin::app
     {
         if (!isReady())
             return notReadyError();
-        if (!m_guiConnected || !m_guiReady)
+        if (m_gui != GuiState::Ready)
             return BoundaryError{.code = BoundaryErrorCode::Busy,
                                  .field = QStringLiteral("cache"),
                                  .detail =
                                      QStringLiteral("GUI is not ready to release cache access")};
-        if (m_cacheSuspend.has_value())
+        if (m_cacheSuspension.has_value())
             return BoundaryError{.code = BoundaryErrorCode::Busy,
                                  .field = QStringLiteral("cache"),
                                  .detail =
                                      QStringLiteral("cache access suspension is already pending")};
 
-        m_cacheSuspend = CacheAccessSuspendRequested{
-            .instance = cacheIdentity().instance, .reason = reason, .targetSchema = targetSchema};
-        m_cacheAccessAcknowledged = false;
-        onBoundaryEvent(*m_cacheSuspend);
+        m_cacheSuspension = CacheSuspension{
+            .request = CacheAccessSuspendRequested{.instance = cacheIdentity().instance,
+                                                   .reason = reason,
+                                                   .targetSchema = targetSchema},
+        };
+        onBoundaryEvent(m_cacheSuspension->request);
         return std::nullopt;
     }
 
     std::optional<protocol::BoundaryError> DaemonProcess::completeCacheAccessResume()
     {
-        if (!m_cacheSuspend.has_value() || !m_cacheAccessAcknowledged || m_services == nullptr)
+        if (!m_cacheSuspension.has_value() ||
+            m_cacheSuspension->phase != CacheSuspension::Phase::Suspended || m_services == nullptr)
             return BoundaryError{.code = BoundaryErrorCode::InvalidRequest,
                                  .field = QStringLiteral("cache"),
                                  .detail = QStringLiteral(
@@ -437,8 +449,7 @@ namespace javelin::app
                                  .field = QStringLiteral("cache"),
                                  .detail = error->message};
         }
-        m_cacheSuspend.reset();
-        m_cacheAccessAcknowledged = false;
+        m_cacheSuspension.reset();
         onBoundaryEvent(CacheAccessResumed{.cache = cacheIdentity(),
                                            .cacheDatabasePath = databasePath(),
                                            .epoch = currentEpoch()});
@@ -744,11 +755,11 @@ namespace javelin::app
     std::optional<protocol::BoundaryError> DaemonProcess::handleCacheAccessSuspended(
         const protocol::CacheAccessSuspendedAcknowledgement& acknowledgement)
     {
-        if (!m_cacheSuspend.has_value())
+        if (!m_cacheSuspension.has_value())
             return BoundaryError{.code = BoundaryErrorCode::InvalidRequest,
                                  .field = QStringLiteral("cache.instance"),
                                  .detail = QStringLiteral("no cache suspension is pending")};
-        if (acknowledgement.instance != m_cacheSuspend->instance)
+        if (acknowledgement.instance != m_cacheSuspension->request.instance)
             return BoundaryError{.code = BoundaryErrorCode::InvalidIdentifier,
                                  .field = QStringLiteral("cache.instance"),
                                  .detail =
@@ -756,12 +767,12 @@ namespace javelin::app
 
         if (const auto error = m_services->cacheAccessBarrier().suspend())
         {
-            m_cacheSuspend.reset();
+            m_cacheSuspension.reset();
             return BoundaryError{.code = BoundaryErrorCode::CacheUnavailable,
                                  .field = QStringLiteral("cache"),
                                  .detail = error->message};
         }
-        m_cacheAccessAcknowledged = true;
+        m_cacheSuspension->phase = CacheSuspension::Phase::Suspended;
         return std::nullopt;
     }
 
@@ -775,12 +786,12 @@ namespace javelin::app
     {
         if (!isReady())
             return notReadyError();
-        if (m_guiReady)
+        if (m_gui == GuiState::Ready)
             return BoundaryError{.code = BoundaryErrorCode::Busy,
                                  .field = QStringLiteral("gui"),
                                  .detail =
                                      QStringLiteral("GUI activation was already acknowledged")};
-        m_guiReady = true;
+        m_gui = GuiState::Ready;
         flushPendingActivations();
         publishStatus();
         return std::nullopt;
@@ -793,12 +804,12 @@ namespace javelin::app
             return BoundaryError{.code = BoundaryErrorCode::Busy,
                                  .field = QStringLiteral("gui"),
                                  .detail = QStringLiteral("daemon is not ready to activate GUI")};
-        if (m_guiConnected && m_guiReady)
+        if (m_gui == GuiState::Ready)
         {
             onBoundaryEvent(ActivationRequested{.route = route});
             return std::nullopt;
         }
-        if (m_guiConnected)
+        if (guiConnected())
         {
             enqueueActivation(route);
             return std::nullopt;
@@ -1364,23 +1375,14 @@ namespace javelin::app
     void DaemonProcess::onSocketConnectionClosed(const protocol::SocketDisconnectReason reason,
                                                  const QString& detail)
     {
-        const bool wasConnected = m_guiConnected;
-        const bool suppressAutomaticRelaunch = m_guiLaunchRequested && !m_guiReady;
-        if (m_cacheAccessAcknowledged && m_services != nullptr)
-        {
-            if (const auto error = m_services->cacheAccessBarrier().resume())
-                qWarning().noquote() << QStringLiteral("Cache barrier resume after GUI disconnect:")
-                                     << error->message;
-        }
+        const bool wasConnected = guiConnected();
+        const bool suppressAutomaticRelaunch = m_gui == GuiState::BootstrappingLaunched;
+        releaseCacheSuspension(QStringLiteral("after GUI disconnect"));
         if (m_remoteActions != nullptr)
             m_remoteActions->releaseGuiResources();
-        m_guiConnected = false;
-        m_guiReady = false;
         // Only the queued activations that the failed GUI was launched for are held back; a new
         // activation is a fresh request and launches the GUI again.
-        m_guiLaunchRequested = false;
-        m_cacheSuspend.reset();
-        m_cacheAccessAcknowledged = false;
+        m_gui = GuiState::Absent;
         if (suppressAutomaticRelaunch)
         {
             qWarning().noquote()
@@ -1399,7 +1401,7 @@ namespace javelin::app
 
     void DaemonProcess::flushPendingActivations()
     {
-        if (!m_guiConnected || !m_guiReady)
+        if (m_gui != GuiState::Ready)
             return;
         while (!m_pendingActivations.empty())
         {
@@ -1411,7 +1413,7 @@ namespace javelin::app
 
     void DaemonProcess::launchGuiIfNeeded()
     {
-        if (m_guiConnected || m_guiLaunchRequested || m_pendingActivations.empty())
+        if (m_gui != GuiState::Absent || m_pendingActivations.empty())
             return;
         if (m_options.guiExecutable.isEmpty())
         {
@@ -1428,7 +1430,7 @@ namespace javelin::app
                                  << m_options.guiExecutable;
             return;
         }
-        m_guiLaunchRequested = true;
+        m_gui = GuiState::Launching;
         m_guiLaunchTimeout.start();
     }
 

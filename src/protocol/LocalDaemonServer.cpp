@@ -118,7 +118,7 @@ namespace javelin::protocol
         if (m_socket == nullptr)
             return;
         // A connection that is being retired accepts no further requests from the peer.
-        if (m_closeAfterWrites || m_disconnectScheduled)
+        if (m_closeAfterWrites.has_value() || m_disconnectScheduled)
         {
             static_cast<void>(m_socket->readAll());
             return;
@@ -128,7 +128,7 @@ namespace javelin::protocol
             sendProtocolError(0, *error);
             return;
         }
-        while (m_socket != nullptr && !m_processingFrame && !m_closeAfterWrites &&
+        while (m_socket != nullptr && !m_processingFrame && !m_closeAfterWrites.has_value() &&
                !m_disconnectScheduled)
         {
             auto decoded = m_decoder.takeFrame();
@@ -169,6 +169,30 @@ namespace javelin::protocol
 
     void SocketDaemonEndpoint::handleFrame(const SocketFrame& frame)
     {
+        const auto enqueueReply =
+            [this, &frame](const SocketFrameKind kind, const EncodedPayloadResult& encoded)
+        {
+            if (auto* error = std::get_if<SocketFrameError>(&encoded))
+            {
+                disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
+                return;
+            }
+            const auto frameData = encodeSocketFrame(kind, frame.correlation,
+                                                     std::get<EncodedPayload>(encoded).payload,
+                                                     m_options.limits.maximumFrameBytes);
+            if (auto* error = std::get_if<SocketFrameError>(&frameData))
+            {
+                disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
+                return;
+            }
+            if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
+                                      .kind = kind,
+                                      .correlation = frame.correlation,
+                                      .event = std::nullopt}))
+                disconnect(SocketDisconnectReason::QueueOverflow,
+                           QStringLiteral("socket output queue is full"));
+        };
+
         const auto rawKind = static_cast<std::uint16_t>(frame.kind);
         if (frame.correlation == 0)
         {
@@ -190,28 +214,10 @@ namespace javelin::protocol
                                   malformed(QStringLiteral("invalid activation request frame")));
                 return;
             }
-            const auto reply =
-                encodeOptionalError(SocketFrameKind::ReadyForActivationReply,
-                                    m_handler.handleGuiReadyForActivation(), m_options.limits);
-            if (auto* error = std::get_if<SocketFrameError>(&reply))
-            {
-                disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
-                return;
-            }
-            const auto frameData = encodeSocketFrame(
-                SocketFrameKind::ReadyForActivationReply, frame.correlation,
-                std::get<EncodedPayload>(reply).payload, m_options.limits.maximumFrameBytes);
-            if (auto* error = std::get_if<SocketFrameError>(&frameData))
-            {
-                disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
-                return;
-            }
-            if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
-                                      .kind = SocketFrameKind::ReadyForActivationReply,
-                                      .correlation = frame.correlation,
-                                      .event = std::nullopt}))
-                disconnect(SocketDisconnectReason::QueueOverflow,
-                           QStringLiteral("socket output queue is full"));
+            enqueueReply(SocketFrameKind::ReadyForActivationReply,
+                         encodeOptionalError(SocketFrameKind::ReadyForActivationReply,
+                                             m_handler.handleGuiReadyForActivation(),
+                                             m_options.limits));
             return;
         }
 
@@ -226,45 +232,18 @@ namespace javelin::protocol
         {
             if (const auto* command = std::get_if<CommandRequest>(&request))
             {
-                const auto reply = encodeCommandReply(
-                    CommandRejected{.id = command->id, .error = *error}, m_options.limits);
-                if (auto* encodedError = std::get_if<SocketFrameError>(&reply))
-                    return disconnect(SocketDisconnectReason::ProtocolViolation,
-                                      encodedError->detail);
-                const auto frameData = encodeSocketFrame(
-                    SocketFrameKind::CommandReplyFrame, frame.correlation,
-                    std::get<EncodedPayload>(reply).payload, m_options.limits.maximumFrameBytes);
-                if (auto* frameError = std::get_if<SocketFrameError>(&frameData))
-                    return disconnect(SocketDisconnectReason::ProtocolViolation,
-                                      frameError->detail);
-                if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
-                                          .kind = SocketFrameKind::CommandReplyFrame,
-                                          .correlation = frame.correlation,
-                                          .event = std::nullopt}))
-                    disconnect(SocketDisconnectReason::QueueOverflow,
-                               QStringLiteral("socket output queue is full"));
+                enqueueReply(SocketFrameKind::CommandReplyFrame,
+                             encodeCommandReply(CommandRejected{.id = command->id, .error = *error},
+                                                m_options.limits));
                 return;
             }
             if (const auto* materialization = std::get_if<MaterializationRequest>(&request))
             {
-                const auto reply = encodeMaterializationReply(
-                    MaterializationRejected{.id = materialization->id, .error = *error},
-                    m_options.limits);
-                if (auto* encodedError = std::get_if<SocketFrameError>(&reply))
-                    return disconnect(SocketDisconnectReason::ProtocolViolation,
-                                      encodedError->detail);
-                const auto frameData = encodeSocketFrame(
-                    SocketFrameKind::MaterializationReplyFrame, frame.correlation,
-                    std::get<EncodedPayload>(reply).payload, m_options.limits.maximumFrameBytes);
-                if (auto* frameError = std::get_if<SocketFrameError>(&frameData))
-                    return disconnect(SocketDisconnectReason::ProtocolViolation,
-                                      frameError->detail);
-                if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
-                                          .kind = SocketFrameKind::MaterializationReplyFrame,
-                                          .correlation = frame.correlation,
-                                          .event = std::nullopt}))
-                    disconnect(SocketDisconnectReason::QueueOverflow,
-                               QStringLiteral("socket output queue is full"));
+                enqueueReply(
+                    SocketFrameKind::MaterializationReplyFrame,
+                    encodeMaterializationReply(
+                        MaterializationRejected{.id = materialization->id, .error = *error},
+                        m_options.limits));
                 return;
             }
             sendProtocolError(frame.correlation,
@@ -291,46 +270,24 @@ namespace javelin::protocol
                               .field = QStringLiteral("hello"),
                               .detail = QStringLiteral(
                                   "socket peer is not compatible with this daemon")}};
-                const auto reply = encodeHandshakeReply(rejected, m_options.limits);
-                if (auto* error = std::get_if<SocketFrameError>(&reply))
-                    return disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
-                const auto frameData = encodeSocketFrame(
-                    SocketFrameKind::HelloReply, frame.correlation,
-                    std::get<EncodedPayload>(reply).payload, m_options.limits.maximumFrameBytes);
-                if (auto* error = std::get_if<SocketFrameError>(&frameData))
-                    return disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
-                if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
-                                          .kind = SocketFrameKind::HelloReply,
-                                          .correlation = frame.correlation,
-                                          .event = std::nullopt}))
-                    disconnect(SocketDisconnectReason::QueueOverflow,
-                               QStringLiteral("socket output queue is full"));
+                enqueueReply(SocketFrameKind::HelloReply,
+                             encodeHandshakeReply(rejected, m_options.limits));
                 return;
             }
             const auto reply = m_handler.handleHello(*hello);
-            const auto encoded = encodeHandshakeReply(reply, m_options.limits);
-            if (auto* error = std::get_if<SocketFrameError>(&encoded))
-                return disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
-            const auto frameData = encodeSocketFrame(SocketFrameKind::HelloReply, frame.correlation,
-                                                     std::get<EncodedPayload>(encoded).payload,
-                                                     m_options.limits.maximumFrameBytes);
-            if (auto* error = std::get_if<SocketFrameError>(&frameData))
-                return disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
             if (isReadyReply(reply))
+            {
                 m_handshakeComplete = true;
+            }
             else
             {
                 // A rejected handshake is returned before the connection is retired.
-                m_closeAfterWrites = true;
-                m_closeReason = SocketDisconnectReason::IncompatiblePeer;
-                m_closeDetail = QStringLiteral("daemon rejected the socket handshake");
+                m_closeAfterWrites = SocketTransportError{
+                    .reason = SocketDisconnectReason::IncompatiblePeer,
+                    .detail = QStringLiteral("daemon rejected the socket handshake")};
             }
-            if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
-                                      .kind = SocketFrameKind::HelloReply,
-                                      .correlation = frame.correlation,
-                                      .event = std::nullopt}))
-                disconnect(SocketDisconnectReason::QueueOverflow,
-                           QStringLiteral("socket output queue is full"));
+            enqueueReply(SocketFrameKind::HelloReply,
+                         encodeHandshakeReply(reply, m_options.limits));
             return;
         }
 
@@ -340,30 +297,6 @@ namespace javelin::protocol
                               malformed(QStringLiteral("HELLO is required before requests")));
             return;
         }
-
-        const auto enqueueReply =
-            [this, &frame](const SocketFrameKind kind, const EncodedPayloadResult& encoded)
-        {
-            if (auto* error = std::get_if<SocketFrameError>(&encoded))
-            {
-                disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
-                return;
-            }
-            const auto frameData = encodeSocketFrame(kind, frame.correlation,
-                                                     std::get<EncodedPayload>(encoded).payload,
-                                                     m_options.limits.maximumFrameBytes);
-            if (auto* error = std::get_if<SocketFrameError>(&frameData))
-            {
-                disconnect(SocketDisconnectReason::ProtocolViolation, error->detail);
-                return;
-            }
-            if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
-                                      .kind = kind,
-                                      .correlation = frame.correlation,
-                                      .event = std::nullopt}))
-                disconnect(SocketDisconnectReason::QueueOverflow,
-                           QStringLiteral("socket output queue is full"));
-        };
 
         std::visit(
             [this, &enqueueReply](auto&& value)
@@ -424,9 +357,8 @@ namespace javelin::protocol
                                                  m_options.limits.maximumFrameBytes);
         if (std::holds_alternative<SocketFrameError>(frameData))
             return;
-        m_closeAfterWrites = true;
-        m_closeReason = SocketDisconnectReason::ProtocolViolation;
-        m_closeDetail = error.detail;
+        m_closeAfterWrites = SocketTransportError{
+            .reason = SocketDisconnectReason::ProtocolViolation, .detail = error.detail};
         if (!enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
                                   .kind = SocketFrameKind::ProtocolError,
                                   .correlation = correlation,
@@ -539,8 +471,11 @@ namespace javelin::protocol
         }
         if (m_pendingWrites.empty())
         {
-            if (m_closeAfterWrites)
-                disconnect(m_closeReason, m_closeDetail);
+            if (m_closeAfterWrites.has_value())
+            {
+                auto outcome = *m_closeAfterWrites;
+                disconnect(outcome.reason, std::move(outcome.detail));
+            }
             return;
         }
         m_currentWrite = std::make_unique<PendingFrame>(std::move(m_pendingWrites.front()));
@@ -608,9 +543,7 @@ namespace javelin::protocol
         m_queuedBytes = 0;
         m_handshakeComplete = false;
         m_disconnectScheduled = false;
-        m_closeAfterWrites = false;
-        m_closeReason = SocketDisconnectReason::None;
-        m_closeDetail.clear();
+        m_closeAfterWrites.reset();
     }
 
 } // namespace javelin::protocol

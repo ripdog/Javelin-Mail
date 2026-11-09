@@ -130,6 +130,8 @@ namespace javelin::app
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError> reloadSettings();
         void connectOperationalEvents();
         void flushPendingActivations();
+        [[nodiscard]] bool guiConnected() const;
+        void releaseCacheSuspension(const QString& context);
         void launchGuiIfNeeded();
         void samplePerformance();
         void refreshOAuthCredentials();
@@ -176,13 +178,37 @@ namespace javelin::app
         javelin::protocol::SettingsSnapshot m_settingsSnapshot;
         javelin::protocol::DaemonInstanceId m_instanceId{.value = QUuid::createUuid()};
         javelin::protocol::InvalidationEpoch m_epoch;
-        std::optional<javelin::protocol::CacheAccessSuspendRequested> m_cacheSuspend;
-        bool m_cacheAccessAcknowledged = false;
+        // A cache suspension starts when the daemon asks the GUI to release cache access and
+        // holds the barrier from the GUI's acknowledgement until the daemon resumes it.
+        struct CacheSuspension
+        {
+            enum class Phase
+            {
+                AwaitingGuiRelease,
+                Suspended,
+            };
+
+            javelin::protocol::CacheAccessSuspendRequested request;
+            Phase phase = Phase::AwaitingGuiRelease;
+        };
+
+        enum class GuiState
+        {
+            Absent,
+            // The daemon started a GUI for queued activations and it has not connected yet.
+            Launching,
+            // A GUI the daemon launched is connected but has not acknowledged readiness, so a
+            // disconnect now is a failed startup and must not relaunch automatically.
+            BootstrappingLaunched,
+            // A GUI started elsewhere is connected but has not acknowledged readiness.
+            Bootstrapping,
+            Ready,
+        };
+
+        std::optional<CacheSuspension> m_cacheSuspension;
         javelin::protocol::DaemonLifecycle m_lifecycle =
             javelin::protocol::DaemonLifecycle::Starting;
-        bool m_guiConnected = false;
-        bool m_guiReady = false;
-        bool m_guiLaunchRequested = false;
+        GuiState m_gui = GuiState::Absent;
         std::deque<javelin::protocol::ActivationRoute> m_pendingActivations;
         QTimer m_performanceTimer;
         QTimer m_oauthRefreshTimer;
