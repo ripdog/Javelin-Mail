@@ -9,12 +9,18 @@ namespace javelin::jmap::sync
 
     void StateChangeCancellation::cancel()
     {
-        m_cancelled = true;
+        m_source.cancel();
     }
 
     bool StateChangeCancellation::isCancelled() const
     {
-        return m_cancelled;
+        return m_source.token().isCancellationRequested();
+    }
+
+    javelin::jmap::api::CancellationRegistration
+    StateChangeCancellation::registerCallback(std::function<void()> callback) const
+    {
+        return m_source.token().registerCallback(std::move(callback));
     }
 
     std::chrono::milliseconds

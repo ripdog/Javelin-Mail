@@ -21,6 +21,7 @@ namespace javelin::jmap::sync
         [[nodiscard]] const QString& serverBaseUrl() const;
         [[nodiscard]] std::chrono::milliseconds timeout() const;
         [[nodiscard]] bool hasTimedOut() const;
+        [[nodiscard]] std::chrono::milliseconds untilTimeout() const;
 
       private:
         StateChangeStatusCallback m_statusCallback;

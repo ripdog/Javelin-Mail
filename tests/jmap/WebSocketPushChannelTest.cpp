@@ -9,6 +9,8 @@
 #include <QHostAddress>
 #include <QTcpServer>
 #include <QTimer>
+#include <QWebSocket>
+#include <QWebSocketServer>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,6 +29,19 @@ namespace
         static QCoreApplication application(argc, argv);
         Q_UNUSED(application);
     }
+
+    class RecordingStateChangeConsumer final : public javelin::jmap::sync::StateChangeConsumer
+    {
+      public:
+        [[nodiscard]] QCoro::Task<void>
+        onStateChange(javelin::jmap::sync::StateChangeEvent event) override
+        {
+            events.push_back(std::move(event));
+            co_return;
+        }
+
+        std::vector<javelin::jmap::sync::StateChangeEvent> events;
+    };
 
     class NoopStateChangeConsumer final : public javelin::jmap::sync::StateChangeConsumer
     {
@@ -173,4 +188,82 @@ TEST_CASE("WebSocket push messages use the shared protocol parser", "[jmap][push
     CHECK(event.changedTypes == std::vector<std::string>{"Email"});
     CHECK(event.changedStates ==
           javelin::jmap::sync::AccountTypeStateMap{{"account-1", {{"Email", "email-2"}}}});
+}
+
+TEST_CASE("WebSocket push cancellation alone interrupts an in-flight handshake",
+          "[jmap][push][websocket]")
+{
+    ensureApplication();
+
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost, 0));
+    const auto endpoint = QStringLiteral("ws://127.0.0.1:%1/jmap").arg(server.serverPort());
+
+    javelin::jmap::sync::WebSocketStateChangeSource source{endpoint.toStdString(), "token"};
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+    NoopStateChangeConsumer consumer;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QTimer::singleShot(25, [&cancellation] { cancellation.cancel(); });
+
+    const auto result = QCoro::waitFor(source.consume(
+        {.accountId = "account-1", .lastState = {}, .types = {"Email"}, .groupwareAccountIds = {}},
+        consumer, cancellation));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::TransportError>(result));
+    CHECK(std::get<javelin::jmap::api::TransportError>(result).code ==
+          javelin::jmap::api::TransportErrorCode::Cancelled);
+    CHECK(elapsed.elapsed() < 1000);
+}
+
+TEST_CASE("WebSocket push delivers state changes and ends promptly when cancelled",
+          "[jmap][push][websocket]")
+{
+    ensureApplication();
+
+    QWebSocketServer server{QStringLiteral("jmap-test"), QWebSocketServer::NonSecureMode};
+    server.setSupportedSubprotocols({QStringLiteral("jmap")});
+    REQUIRE(server.listen(QHostAddress::LocalHost, 0));
+    std::unique_ptr<QWebSocket> peer;
+    QObject::connect(&server, &QWebSocketServer::newConnection, &server,
+                     [&server, &peer]
+                     {
+                         peer.reset(server.nextPendingConnection());
+                         QObject::connect(peer.get(), &QWebSocket::textMessageReceived, peer.get(),
+                                          [&peer](const QString&)
+                                          {
+                                              peer->sendTextMessage(QStringLiteral(
+                                                  R"({"@type":"StateChange","changed":)"
+                                                  R"({"account-1":{"Email":"email-state-2"}},)"
+                                                  R"("pushState":"push-state-2"})"));
+                                          });
+                     });
+    const auto endpoint = QStringLiteral("ws://127.0.0.1:%1/jmap").arg(server.serverPort());
+
+    javelin::jmap::sync::WebSocketStateChangeSource source{endpoint.toStdString(), "token"};
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+    RecordingStateChangeConsumer consumer;
+    QElapsedTimer sinceDelivery;
+    QTimer deliveryWatch;
+    deliveryWatch.setInterval(1);
+    QObject::connect(&deliveryWatch, &QTimer::timeout, &deliveryWatch,
+                     [&consumer, &cancellation, &sinceDelivery, &deliveryWatch]
+                     {
+                         if (consumer.events.empty())
+                             return;
+                         deliveryWatch.stop();
+                         sinceDelivery.start();
+                         cancellation.cancel();
+                     });
+    deliveryWatch.start();
+
+    const auto result = QCoro::waitFor(source.consume(
+        {.accountId = "account-1", .lastState = {}, .types = {"Email"}, .groupwareAccountIds = {}},
+        consumer, cancellation));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::StateChangeStreamSummary>(result));
+    REQUIRE(consumer.events.size() == 1);
+    CHECK(consumer.events.front().newState == "push-state-2");
+    REQUIRE(sinceDelivery.isValid());
+    CHECK(sinceDelivery.elapsed() < 1000);
 }

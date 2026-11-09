@@ -1,5 +1,6 @@
 #include "jmap/sync/PushActivityTracker.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace javelin::jmap::sync
@@ -51,5 +52,11 @@ namespace javelin::jmap::sync
     bool PushActivityTracker::hasTimedOut() const
     {
         return m_lastActivity.elapsed() > m_timeout.count();
+    }
+
+    std::chrono::milliseconds PushActivityTracker::untilTimeout() const
+    {
+        return std::chrono::milliseconds{
+            std::max<qint64>(0, m_timeout.count() - m_lastActivity.elapsed())};
     }
 } // namespace javelin::jmap::sync

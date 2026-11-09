@@ -37,7 +37,6 @@ namespace javelin::jmap::sync
     namespace
     {
         constexpr auto connectTimeout = std::chrono::seconds{15};
-        constexpr auto cancellationPollInterval = std::chrono::milliseconds{250};
 
     } // namespace
 } // namespace javelin::jmap::sync
@@ -106,6 +105,8 @@ namespace javelin::jmap::sync
         socket.open(handshake, handshakeOptions);
         qCInfo(logWebSocket) << "connecting";
 
+        // Cancelling during the handshake aborts the socket, which wakes the state wait below.
+        auto connectCancellation = cancellation.registerCallback([&socket]() { socket.abort(); });
         QElapsedTimer elapsed;
         elapsed.start();
         const auto timeoutMs =
@@ -134,9 +135,9 @@ namespace javelin::jmap::sync
 
             const auto remaining =
                 std::chrono::milliseconds{std::max<qint64>(1, timeoutMs - elapsed.elapsed())};
-            static_cast<void>(co_await qCoro(&socket, &QWebSocket::stateChanged,
-                                             std::min(remaining, cancellationPollInterval)));
+            static_cast<void>(co_await qCoro(&socket, &QWebSocket::stateChanged, remaining));
         }
+        connectCancellation.reset();
         if (cancellation.isCancelled())
         {
             socket.abort();
@@ -180,12 +181,20 @@ namespace javelin::jmap::sync
         }
         bool protocolActivityReceived = false;
         std::deque<QString> messages;
+        // The receive loop sleeps on this timer until a message, a socket state change, a
+        // cancellation, or the activity deadline wakes it.
+        QTimer wakeup;
+        wakeup.setSingleShot(true);
+        const auto wake = [&wakeup]() { wakeup.start(0); };
         QObject::connect(&socket, &QWebSocket::textMessageReceived, &socket,
-                         [&messages, &activity](QString message)
+                         [&messages, &activity, &wake](QString message)
                          {
                              activity.recordActivity();
                              messages.push_back(std::move(message));
+                             wake();
                          });
+        QObject::connect(&socket, &QWebSocket::stateChanged, &wakeup, wake);
+        const auto cancellationRegistration = cancellation.registerCallback(wake);
         QObject::connect(&socket, &QWebSocket::pong, &socket,
                          [&activity, &protocolActivityReceived](quint64, const QByteArray&)
                          {
@@ -247,10 +256,8 @@ namespace javelin::jmap::sync
             }
             if (messages.empty())
             {
-                QTimer waitTimer;
-                waitTimer.setSingleShot(true);
-                waitTimer.start(std::chrono::milliseconds{100});
-                co_await qCoro(waitTimer).waitForTimeout();
+                wakeup.start(activity.untilTimeout() + std::chrono::milliseconds{1});
+                co_await qCoro(wakeup).waitForTimeout();
                 continue;
             }
 

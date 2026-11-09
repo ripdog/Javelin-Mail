@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
 
 #include <QCoroTask>
@@ -85,9 +86,12 @@ namespace javelin::jmap::sync
       public:
         void cancel();
         [[nodiscard]] bool isCancelled() const;
+        // Runs callback when cancel() is called; the registration unregisters it on destruction.
+        [[nodiscard]] javelin::jmap::api::CancellationRegistration
+        registerCallback(std::function<void()> callback) const;
 
       private:
-        bool m_cancelled = false;
+        javelin::jmap::api::CancellationSource m_source;
     };
 
     using StateChangeSourceResult =

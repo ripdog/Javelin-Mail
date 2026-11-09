@@ -1085,16 +1085,23 @@ namespace javelin::app
     QCoro::Task<bool> FullMailSyncService::waitForBackgroundNetwork(std::string id)
     {
         const QPointer<FullMailSyncService> self{this};
+        // Background admission changes emit foregroundAvailabilityChanged and pause requests
+        // emit jobsChanged; either one wakes the wait to re-evaluate.
+        QTimer wakeup;
+        wakeup.setSingleShot(true);
+        const auto wake = [&wakeup]() { wakeup.start(0); };
+        QObject::connect(&m_scheduler, &WorkScheduler::foregroundAvailabilityChanged, &wakeup,
+                         wake);
+        QObject::connect(&m_scheduler, &WorkScheduler::jobsChanged, &wakeup, wake);
         while (!m_scheduler.mayStartBackgroundNetwork())
         {
             const auto job = m_scheduler.find(id);
             const auto* value = std::get_if<std::optional<WorkRecord>>(&job);
             if (value == nullptr || !value->has_value() || (*value)->pauseRequested)
                 co_return false;
-            QTimer timer;
-            timer.setSingleShot(true);
-            timer.start(std::chrono::milliseconds{100});
-            co_await qCoro(timer).waitForTimeout();
+            // The signals above end the wait; the long deadline only arms the timer.
+            wakeup.start(std::chrono::hours{1});
+            co_await qCoro(wakeup).waitForTimeout();
             if (!self)
                 co_return false;
         }
