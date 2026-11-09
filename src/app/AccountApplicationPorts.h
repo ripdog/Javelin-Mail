@@ -2,6 +2,8 @@
 
 #include "storage/DatabaseError.h"
 
+#include <QCoroTask>
+
 #include <QString>
 #include <QStringList>
 
@@ -13,9 +15,9 @@ namespace javelin::app
       public:
         virtual ~AccountCommandPort() = default;
 
-        [[nodiscard]] virtual std::optional<javelin::jmap::cache::DatabaseError>
-        removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
-                                const QStringList& knownAccountIds) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        removeConfiguredAccount(QString loginEmail, QString sessionUrl,
+                                QStringList knownAccountIds) = 0;
     };
 
 } // namespace javelin::app

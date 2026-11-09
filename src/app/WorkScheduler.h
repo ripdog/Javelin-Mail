@@ -60,7 +60,7 @@ namespace javelin::app
         std::chrono::microseconds totalForegroundAdmissionLatency{};
     };
 
-    class WorkScheduler final : public QObject, public WorkTaskPort
+    class WorkScheduler final : public QObject
     {
         Q_OBJECT
 
@@ -79,13 +79,13 @@ namespace javelin::app
                QString checkpointJson = QStringLiteral("{}"),
                std::optional<QString> errorText = std::nullopt);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        pause(std::string_view jobId) override;
+        pause(std::string_view jobId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        resume(std::string_view jobId) override;
+        resume(std::string_view jobId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        retry(std::string_view jobId) override;
+        retry(std::string_view jobId);
         [[nodiscard]] std::variant<std::vector<WorkRecord>, javelin::jmap::cache::DatabaseError>
-        list() const override;
+        list() const;
         [[nodiscard]] std::variant<std::optional<WorkRecord>, javelin::jmap::cache::DatabaseError>
         find(std::string_view jobId) const;
 
@@ -103,9 +103,9 @@ namespace javelin::app
         void endForegroundWork();
         void setNetworkReachable(bool reachable);
         [[nodiscard]] bool mayStartBackgroundNetwork() const;
-        [[nodiscard]] QString summary() const override;
-        [[nodiscard]] QMetaObject::Connection
-        connectChanged(QObject* context, std::function<void()> callback) override;
+        [[nodiscard]] QString summary() const;
+        [[nodiscard]] QMetaObject::Connection connectChanged(QObject* context,
+                                                             std::function<void()> callback);
 
       Q_SIGNALS:
         void jobsChanged();

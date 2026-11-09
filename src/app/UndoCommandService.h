@@ -20,10 +20,10 @@ namespace javelin::app
 
         [[nodiscard]] QCoro::Task<bool> undo() override;
         [[nodiscard]] QCoro::Task<bool> redo() override;
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        acknowledgeAndRemove(const QString& entryId) override;
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        forget(const QString& entryId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        acknowledgeAndRemove(QString entryId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        forget(QString entryId) override;
         [[nodiscard]] const undo::HistoryState& state() const override;
         [[nodiscard]] const std::vector<undo::HistoryEntry>& entries() const override;
 

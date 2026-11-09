@@ -41,11 +41,6 @@ namespace javelin::jmap::cache
     class MessageViewService;
 } // namespace javelin::jmap::cache
 
-namespace javelin::jmap::calendar
-{
-    class CalendarReader;
-} // namespace javelin::jmap::calendar
-
 namespace javelin::jmap::contacts
 {
     class ContactIdentityLookup;
@@ -56,6 +51,7 @@ namespace javelin::app
     class AccountCommandPort;
     class AccountRefreshPort;
     class CalendarCommandPort;
+    class CalendarReadPort;
     class ComposeCommandPort;
     class ContactCommandPort;
     class DeveloperDiagnosticsPort;
@@ -115,7 +111,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::MailboxReader& mailboxReader();
         [[nodiscard]] javelin::jmap::cache::MailTagReader& mailTagReader();
         [[nodiscard]] javelin::jmap::cache::ContactReader& contactReader();
-        [[nodiscard]] javelin::jmap::calendar::CalendarReader& calendarReader();
+        [[nodiscard]] CalendarReadPort& calendarReader();
         [[nodiscard]] javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup();
         [[nodiscard]] javelin::jmap::cache::IdentityReader& identityReader();
         [[nodiscard]] javelin::jmap::cache::MessageViewReader& messageViewReader();

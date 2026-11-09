@@ -6,6 +6,8 @@
 #include "jmap/search/EmailSearch.h"
 #include "jmap/submission/ComposeTypes.h"
 
+#include <QCoroTask>
+
 #include <KXmlGuiWindow>
 #include <QModelIndex>
 #include <QPointer>
@@ -315,9 +317,11 @@ namespace javelin::gui::shell
                                      std::optional<std::string> emailId);
         void selectPendingInitialMailbox();
         void restorePersistentState();
+        [[nodiscard]] QCoro::Task<> restorePersistentStateAsync();
         void restoreMailboxTab(const PersistedMailboxTab& tab);
         void restoreSearchTab(PersistedSearchTab tab);
-        void restoreComposeTab(const PersistedComposeTab& tab);
+        void restoreComposeTab(const PersistedComposeTab& tab,
+                               javelin::jmap::submission::DraftSnapshot snapshot);
         void restoreContactsTab(const PersistedContactsTab& tab);
         void savePersistentState() const;
         void updateEmptyStates();
@@ -489,6 +493,7 @@ namespace javelin::gui::shell
         std::optional<int>& m_activeTabIndex;
         std::vector<TabState>& m_tabs;
         bool m_modelUpdateInProgress = false;
+        bool m_restoringPersistentState = false;
         std::unique_ptr<ClosedTabState> m_lastClosedTab;
         javelin::gui::developer::DeveloperOptionsDialog* m_developerOptionsDialog = nullptr;
         std::optional<std::string> m_pendingInitialMailboxAccountId;

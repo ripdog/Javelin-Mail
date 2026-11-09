@@ -52,7 +52,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         deleteCalendar(std::string ownerAccountId,
                        javelin::jmap::calendar::DeleteCalendarCommand command) override;
-        [[nodiscard]] javelin::jmap::calendar::CalendarPreferenceResult
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarPreferenceResult>
         setCalendarVisible(std::string accountId, std::string calendarId, bool visible,
                            undo::CommandOrigin origin = undo::CommandOrigin::User) override;
 

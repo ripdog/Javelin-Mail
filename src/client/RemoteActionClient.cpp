@@ -40,69 +40,6 @@ namespace javelin::app
         failAll(QStringLiteral("The GUI remote action client was destroyed."));
     }
 
-    RemoteActionClient::RawResult
-    RemoteActionClient::invokeImmediate(const javelin::protocol::ActionId action,
-                                        QByteArray payload)
-    {
-        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("remote_action_e2e"),
-                                QStringLiteral("kind=%1 payload_bytes=%2")
-                                    .arg(remoteActionMetricName(action))
-                                    .arg(payload.size())};
-        const auto commandId = javelin::protocol::CommandId{.value = QUuid::createUuid()};
-        const auto originalDaemon = m_session.daemonInstance();
-        auto reply = m_session.submitRemoteAction(action, payload, commandId);
-        if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply);
-            rejected != nullptr &&
-            rejected->error.code == javelin::protocol::BoundaryErrorCode::TransportUnavailable)
-        {
-            if (!originalDaemon.has_value())
-            {
-                metrics.finish(QStringLiteral("transport_unavailable"));
-                return error(rejected->error);
-            }
-            if (const auto reconnectError = m_session.reconnect())
-            {
-                metrics.finish(QStringLiteral("transport_unavailable"));
-                return RemoteCallError{
-                    .code = javelin::protocol::BoundaryErrorCode::TransportUnavailable,
-                    .detail = reconnectError->detail,
-                };
-            }
-            const auto reconnectedDaemon = m_session.daemonInstance();
-            if (!reconnectedDaemon.has_value() || *reconnectedDaemon != *originalDaemon)
-            {
-                metrics.finish(QStringLiteral("unknown"));
-                return RemoteCallError{
-                    .code = javelin::protocol::BoundaryErrorCode::TransportUnavailable,
-                    .detail = QStringLiteral(
-                        "The daemon restarted before the command result was known; the command was "
-                        "not repeated automatically."),
-                };
-            }
-            reply = m_session.submitRemoteAction(action, std::move(payload), commandId);
-        }
-
-        if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply))
-        {
-            metrics.finish(QStringLiteral("rejected"));
-            scheduleAcknowledgement(commandId);
-            return error(rejected->error);
-        }
-        const auto& accepted = std::get<javelin::protocol::CommandAccepted>(reply);
-        if (!accepted.immediateResult.has_value())
-        {
-            metrics.finish(QStringLiteral("protocol_error"));
-            return RemoteCallError{
-                .code = javelin::protocol::BoundaryErrorCode::ProtocolViolation,
-                .detail = QStringLiteral("The daemon did not return an immediate result."),
-            };
-        }
-        metrics.finish(QStringLiteral("completed"));
-        auto result = *accepted.immediateResult;
-        scheduleAcknowledgement(commandId);
-        return result;
-    }
-
     QFuture<RemoteActionClient::RawResult>
     RemoteActionClient::invoke(const javelin::protocol::ActionId action, QByteArray payload)
     {

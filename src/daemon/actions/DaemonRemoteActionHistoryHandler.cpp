@@ -1,6 +1,7 @@
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
 
 #include "app/UndoApplicationPorts.h"
+#include "app/undo/UndoManager.h"
 #include "daemon/DaemonServices.h"
 
 namespace javelin::app
@@ -22,7 +23,7 @@ namespace javelin::app
                 [this, &id](const QString& entryId)
                 {
                     return acceptValue<actions::UndoAcknowledgeRemove>(
-                        id, m_services.undoCommandPort().acknowledgeAndRemove(entryId));
+                        id, m_services.undoManager().acknowledgeAndRemove(entryId));
                 });
         case actions::UndoForget::id.value:
             return dispatchDecoded<actions::UndoForget>(
@@ -30,7 +31,7 @@ namespace javelin::app
                 [this, &id](const QString& entryId)
                 {
                     return acceptValue<actions::UndoForget>(
-                        id, m_services.undoCommandPort().forget(entryId));
+                        id, m_services.undoManager().forget(entryId));
                 });
         case actions::UndoSnapshot::id.value:
             return acceptValue<actions::UndoSnapshot>(

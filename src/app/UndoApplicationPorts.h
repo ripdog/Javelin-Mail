@@ -20,10 +20,10 @@ namespace javelin::app
 
         [[nodiscard]] virtual QCoro::Task<bool> undo() = 0;
         [[nodiscard]] virtual QCoro::Task<bool> redo() = 0;
-        [[nodiscard]] virtual std::optional<javelin::jmap::cache::DatabaseError>
-        acknowledgeAndRemove(const QString& entryId) = 0;
-        [[nodiscard]] virtual std::optional<javelin::jmap::cache::DatabaseError>
-        forget(const QString& entryId) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        acknowledgeAndRemove(QString entryId) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        forget(QString entryId) = 0;
         [[nodiscard]] virtual const undo::HistoryState& state() const = 0;
         [[nodiscard]] virtual const std::vector<undo::HistoryEntry>& entries() const = 0;
 

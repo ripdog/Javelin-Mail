@@ -4,6 +4,7 @@
 #include "app/AccountRefreshApplicationPorts.h"
 #include "daemon/DaemonServices.h"
 #include "jmap/auth/AccountOnboardingService.h"
+#include "jmap/cache/AccountRepository.h"
 
 namespace javelin::app
 {
@@ -73,7 +74,7 @@ namespace javelin::app
                             const QStringList& accountIds)
                 {
                     return acceptValue<actions::RemoveConfiguredAccount>(
-                        id, m_services.accountCommandPort().removeConfiguredAccount(
+                        id, m_services.accountRepository().removeConfiguredAccount(
                                 loginEmail, sessionUrl, accountIds));
                 });
         case actions::AccountBootstrap::id.value:

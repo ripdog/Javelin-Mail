@@ -4,6 +4,8 @@
 #include "gui/compose/ComposeRecipientController.h"
 #include "jmap/submission/ComposeTypes.h"
 
+#include <QCoroTask>
+
 #include <QTextCursor>
 #include <QWidget>
 
@@ -88,6 +90,7 @@ namespace javelin::gui::compose
         [[nodiscard]] QMenu* signatureMenu() const;
 
         void saveDraftAndClose();
+        void discardAndClose();
         void setRichTextEnabled(bool enabled);
         void editCurrentSignature();
 
@@ -109,6 +112,7 @@ namespace javelin::gui::compose
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
         void userInterventionRequired(const QString& message);
         void closeRequested();
+        void discardFailed(const javelin::jmap::OperationError& error);
         void toolbarStateChanged();
         void manageIdentitiesRequested(QString accountId, QString identityId);
 
@@ -158,6 +162,9 @@ namespace javelin::gui::compose
         [[nodiscard]] QString stableEditorHtml();
         void reconcileInlineAttachmentReferences(const QString& html);
         void startSaveDraft(bool closeAfterSave);
+        [[nodiscard]] QCoro::Task<>
+        saveDraftWorkingCopy(javelin::app::AccountConnectionSettings settings, bool closeAfterSave);
+        [[nodiscard]] QCoro::Task<> discardWorkingCopy();
         void startSend(std::optional<std::chrono::system_clock::time_point> sendAt = std::nullopt);
         [[nodiscard]] std::optional<std::uint64_t> currentMaxDelayedSendSeconds() const;
         void toggleCode();
@@ -171,7 +178,6 @@ namespace javelin::gui::compose
         bool m_syncingUi = false;
         bool m_operationInFlight = false;
         bool m_closeWithoutPrompt = false;
-        bool m_closeAfterSave = false;
         int m_previousIdentityIndex = -1;
         DeferredOperation m_deferredOperation = DeferredOperation::None;
         ComposeAutosaveController* m_autosaveController = nullptr;

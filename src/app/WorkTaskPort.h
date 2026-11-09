@@ -2,6 +2,7 @@
 
 #include "storage/DatabaseError.h"
 
+#include <QCoroTask>
 #include <QMetaObject>
 #include <QObject>
 #include <QString>
@@ -140,16 +141,16 @@ namespace javelin::app
       public:
         virtual ~WorkTaskPort() = default;
 
-        [[nodiscard]] virtual std::optional<javelin::jmap::cache::DatabaseError>
-        pause(std::string_view jobId) = 0;
-        [[nodiscard]] virtual std::optional<javelin::jmap::cache::DatabaseError>
-        resume(std::string_view jobId) = 0;
-        [[nodiscard]] virtual std::optional<javelin::jmap::cache::DatabaseError>
-        retry(std::string_view jobId) = 0;
-        [[nodiscard]] virtual std::variant<std::vector<WorkRecord>,
-                                           javelin::jmap::cache::DatabaseError>
-        list() const = 0;
-        [[nodiscard]] virtual QString summary() const = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        pause(std::string jobId) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        resume(std::string jobId) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        retry(std::string jobId) = 0;
+        [[nodiscard]] virtual QCoro::Task<
+            std::variant<std::vector<WorkRecord>, javelin::jmap::cache::DatabaseError>>
+        list() = 0;
+        [[nodiscard]] virtual QCoro::Task<QString> summary() = 0;
         [[nodiscard]] virtual QMetaObject::Connection
         connectChanged(QObject* context, std::function<void()> callback) = 0;
     };

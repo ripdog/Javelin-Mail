@@ -1564,11 +1564,13 @@ namespace javelin::gui::shell
         messageBox.exec();
         if (failure.acknowledgeAndRemove)
         {
-            static_cast<void>(m_undoCommandPort.acknowledgeAndRemove(failure.entryId));
+            QCoro::connect(m_undoCommandPort.acknowledgeAndRemove(failure.entryId), this,
+                           [](const std::optional<javelin::jmap::cache::DatabaseError>&) {});
         }
         else if (removeButton != nullptr && messageBox.clickedButton() == removeButton)
         {
-            static_cast<void>(m_undoCommandPort.forget(failure.entryId));
+            QCoro::connect(m_undoCommandPort.forget(failure.entryId), this,
+                           [](const std::optional<javelin::jmap::cache::DatabaseError>&) {});
         }
     }
 
@@ -3252,7 +3254,9 @@ namespace javelin::gui::shell
         case ComposeTabClosePlan::CloseImmediately:
             return m_composeTabController->closeImmediately(index);
         case ComposeTabClosePlan::DiscardWorkingCopyAndClose:
-            return m_composeTabController->discardAndClose(index);
+            // The tab closes once the daemon has discarded the working copy.
+            m_composeTabController->discardAndClose(index);
+            return false;
         case ComposeTabClosePlan::ConfirmKeepSavedDraft:
         {
             QMessageBox messageBox{this};
@@ -3266,7 +3270,8 @@ namespace javelin::gui::shell
             messageBox.exec();
             if (messageBox.clickedButton() != keepDraftButton)
                 return false;
-            return m_composeTabController->discardAndClose(index);
+            m_composeTabController->discardAndClose(index);
+            return false;
         }
         case ComposeTabClosePlan::ConfirmSaveOrDiscard:
         {
@@ -3287,7 +3292,8 @@ namespace javelin::gui::shell
             }
             if (messageBox.clickedButton() != discardButton)
                 return false;
-            return m_composeTabController->discardAndClose(index);
+            m_composeTabController->discardAndClose(index);
+            return false;
         }
         }
         return false;
@@ -4234,6 +4240,13 @@ namespace javelin::gui::shell
 
     void MainWindow::restorePersistentState()
     {
+        // Saving before the restore finishes would drop the tabs that are not recreated yet.
+        m_restoringPersistentState = true;
+        QCoro::connect(restorePersistentStateAsync(), this, [] {});
+    }
+
+    QCoro::Task<> MainWindow::restorePersistentStateAsync()
+    {
         auto state = deserializeMainWindowState(m_settings.workspaceSettings().mainWindowState,
                                                 m_emailListSort);
         if (!state.geometry.isEmpty())
@@ -4243,15 +4256,43 @@ namespace javelin::gui::shell
 
         m_mailWorkspaceController->setSort(state.emailListSort);
         updateSortButton();
-
         m_mailWorkspaceController->prepareRestore(state.tabs.size());
+
+        // Fetch everything restored tabs need from the daemon first, so the tabs themselves are
+        // recreated synchronously and in their persisted order.
+        const QPointer<MainWindow> self{this};
+        std::vector<std::optional<javelin::jmap::submission::DraftSnapshot>> workingCopies(
+            state.tabs.size());
+        bool restoresCalendar = false;
+        for (std::size_t index = 0; index < state.tabs.size(); ++index)
+        {
+            if (const auto* compose = std::get_if<PersistedComposeTab>(&state.tabs[index]))
+            {
+                workingCopies[index] = co_await m_composeTabController->loadRestoredWorkingCopy(
+                    compose->composeSessionId);
+                if (!self)
+                    co_return;
+            }
+            else if (std::holds_alternative<PersistedCalendarTab>(state.tabs[index]))
+            {
+                restoresCalendar = true;
+            }
+        }
+        if (restoresCalendar)
+        {
+            co_await m_calendarTabController->ensureAccountsLoaded();
+            if (!self)
+                co_return;
+        }
+        m_restoringPersistentState = false;
+
         std::vector<std::optional<int>> restoredTabIndices;
         restoredTabIndices.reserve(state.tabs.size());
-        for (auto& tab : state.tabs)
+        for (std::size_t tabIndex = 0; tabIndex < state.tabs.size(); ++tabIndex)
         {
             const auto tabCountBeforeRestore = m_tabs.size();
             std::visit(
-                [this](auto& persisted)
+                [this, &workingCopy = workingCopies[tabIndex]](auto& persisted)
                 {
                     using Persisted = std::decay_t<decltype(persisted)>;
                     if constexpr (std::is_same_v<Persisted, PersistedMailboxTab>)
@@ -4259,13 +4300,16 @@ namespace javelin::gui::shell
                     else if constexpr (std::is_same_v<Persisted, PersistedSearchTab>)
                         restoreSearchTab(std::move(persisted));
                     else if constexpr (std::is_same_v<Persisted, PersistedComposeTab>)
-                        restoreComposeTab(persisted);
+                    {
+                        if (workingCopy.has_value())
+                            restoreComposeTab(persisted, std::move(*workingCopy));
+                    }
                     else if constexpr (std::is_same_v<Persisted, PersistedContactsTab>)
                         restoreContactsTab(persisted);
                     else if constexpr (std::is_same_v<Persisted, PersistedCalendarTab>)
                         m_calendarTabController->open(persisted.displayedMonth);
                 },
-                tab);
+                state.tabs[tabIndex]);
             restoredTabIndices.push_back(
                 m_tabs.size() > tabCountBeforeRestore
                     ? std::optional<int>{static_cast<int>(tabCountBeforeRestore)}
@@ -4292,7 +4336,7 @@ namespace javelin::gui::shell
                 activateMailboxSelection(true);
                 break;
             }
-            return;
+            co_return;
         }
 
         m_mailWorkspaceController->setActiveIndex(
@@ -4327,9 +4371,10 @@ namespace javelin::gui::shell
         tabSelection(m_tabs[static_cast<std::size_t>(index)]) = std::move(plan.selection);
     }
 
-    void MainWindow::restoreComposeTab(const PersistedComposeTab& tab)
+    void MainWindow::restoreComposeTab(const PersistedComposeTab& tab,
+                                       javelin::jmap::submission::DraftSnapshot snapshot)
     {
-        static_cast<void>(m_composeTabController->restore(tab));
+        m_composeTabController->restore(tab, std::move(snapshot));
     }
 
     void MainWindow::restoreContactsTab(const PersistedContactsTab& tab)
@@ -4339,6 +4384,8 @@ namespace javelin::gui::shell
 
     void MainWindow::savePersistentState() const
     {
+        if (m_restoringPersistentState)
+            return;
         PersistedMainWindowState state{
             .geometry = saveGeometry(),
             .splitterState = m_mainSplitter->saveState(),

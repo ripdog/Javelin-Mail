@@ -32,13 +32,13 @@ namespace javelin::app
                      javelin::jmap::submission::ScheduledSendRequest request) override;
         [[nodiscard]] QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
         cancelDeferredSend(QString sendId) override;
-        [[nodiscard]] std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
-                                   javelin::jmap::OperationError>
-        loadWorkingCopy(std::string_view composeSessionId) const override;
-        [[nodiscard]] std::optional<javelin::jmap::OperationError>
-        storeWorkingCopy(const javelin::jmap::submission::DraftSnapshot& snapshot) override;
-        [[nodiscard]] std::optional<javelin::jmap::OperationError>
-        discard(std::string_view composeSessionId) override;
+        [[nodiscard]] QCoro::Task<std::variant<
+            std::optional<javelin::jmap::submission::DraftSnapshot>, javelin::jmap::OperationError>>
+        loadWorkingCopy(std::string composeSessionId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        storeWorkingCopy(javelin::jmap::submission::DraftSnapshot snapshot) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        discard(std::string composeSessionId) override;
 
       private:
         ComposeService& m_service;

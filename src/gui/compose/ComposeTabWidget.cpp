@@ -56,6 +56,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMimeDatabase>
+#include <QPointer>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
@@ -948,11 +949,12 @@ namespace javelin::gui::compose
             return;
 
         syncSnapshotFromUi();
-        if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
-        {
-            Q_EMIT statusMessageRequested(error->message, 10000);
-            return;
-        }
+        QCoro::connect(m_composeCommandPort.storeWorkingCopy(m_snapshot), this,
+                       [this](const std::optional<javelin::jmap::OperationError>& error)
+                       {
+                           if (error.has_value())
+                               Q_EMIT statusMessageRequested(error->message, 10000);
+                       });
     }
 
     void ComposeTabWidget::setBusy(const bool busy)
@@ -1280,55 +1282,95 @@ namespace javelin::gui::compose
             return;
         }
 
-        if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
+        // Busy blocks autosave, edits, and tab closing until the whole save sequence settles.
+        setBusy(true);
+        QCoro::connect(saveDraftWorkingCopy(*settings, closeAfterSave), this, [] {});
+    }
+
+    QCoro::Task<>
+    ComposeTabWidget::saveDraftWorkingCopy(javelin::app::AccountConnectionSettings settings,
+                                           const bool closeAfterSave)
+    {
+        const QPointer<ComposeTabWidget> self{this};
+        const auto failed = [this](const javelin::jmap::OperationError& error)
         {
-            Q_EMIT statusMessageRequested(error->message, 10000);
-            return;
+            setBusy(false);
+            Q_EMIT statusMessageRequested(error.message, 10000);
+        };
+
+        auto stored = co_await m_composeCommandPort.storeWorkingCopy(m_snapshot);
+        if (!self)
+            co_return;
+        if (stored.has_value())
+        {
+            failed(*stored);
+            co_return;
         }
 
-        setBusy(true);
-        m_closeAfterSave = closeAfterSave;
         Q_EMIT statusMessageRequested(i18n("Saving draft..."), 5000);
-        auto task = m_composeCommandPort.saveDraft(*settings, m_snapshot);
-        QCoro::connect(
-            std::move(task), this,
-            [this](std::variant<javelin::jmap::submission::DraftSaveSummary,
-                                javelin::jmap::OperationError>
-                       result)
-            {
-                setBusy(false);
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    Q_EMIT statusMessageRequested(error->message, 10000);
-                    m_closeAfterSave = false;
-                    return;
-                }
+        auto result = co_await m_composeCommandPort.saveDraft(std::move(settings), m_snapshot);
+        if (!self)
+            co_return;
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            failed(*error);
+            co_return;
+        }
 
-                const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(result);
-                m_snapshot = summary.savedSnapshot;
-                populateAttachments();
-                if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
-                {
-                    Q_EMIT statusMessageRequested(error->message, 10000);
-                    m_closeAfterSave = false;
-                    return;
-                }
+        m_snapshot = std::get<javelin::jmap::submission::DraftSaveSummary>(result).savedSnapshot;
+        populateAttachments();
+        stored = co_await m_composeCommandPort.storeWorkingCopy(m_snapshot);
+        if (!self)
+            co_return;
+        if (stored.has_value())
+        {
+            failed(*stored);
+            co_return;
+        }
 
-                m_autosaveController->markSaved();
-                Q_EMIT statusMessageRequested(i18n("Draft saved."), 5000);
-                if (m_closeAfterSave)
-                {
-                    m_closeAfterSave = false;
-                    if (const auto error =
-                            m_composeCommandPort.discard(m_snapshot.composeSessionId))
-                    {
-                        Q_EMIT statusMessageRequested(error->message, 10000);
-                        return;
-                    }
-                    m_closeWithoutPrompt = true;
-                    Q_EMIT closeRequested();
-                }
-            });
+        m_autosaveController->markSaved();
+        Q_EMIT statusMessageRequested(i18n("Draft saved."), 5000);
+        if (!closeAfterSave)
+        {
+            setBusy(false);
+            co_return;
+        }
+
+        const auto discarded = co_await m_composeCommandPort.discard(m_snapshot.composeSessionId);
+        if (!self)
+            co_return;
+        setBusy(false);
+        if (discarded.has_value())
+        {
+            Q_EMIT statusMessageRequested(discarded->message, 10000);
+            co_return;
+        }
+        m_closeWithoutPrompt = true;
+        Q_EMIT closeRequested();
+    }
+
+    void ComposeTabWidget::discardAndClose()
+    {
+        if (m_operationInFlight)
+            return;
+        setBusy(true);
+        QCoro::connect(discardWorkingCopy(), this, [] {});
+    }
+
+    QCoro::Task<> ComposeTabWidget::discardWorkingCopy()
+    {
+        const QPointer<ComposeTabWidget> self{this};
+        const auto error = co_await m_composeCommandPort.discard(m_snapshot.composeSessionId);
+        if (!self)
+            co_return;
+        setBusy(false);
+        if (error.has_value())
+        {
+            Q_EMIT discardFailed(*error);
+            co_return;
+        }
+        m_closeWithoutPrompt = true;
+        Q_EMIT closeRequested();
     }
 
     void

@@ -1,6 +1,7 @@
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
 
 #include "app/ComposeApplicationPorts.h"
+#include "app/ComposeService.h"
 #include "daemon/DaemonServices.h"
 
 namespace javelin::app
@@ -107,7 +108,7 @@ namespace javelin::app
                 [this, &id](const std::string& sessionId)
                 {
                     return acceptValue<actions::ComposeLoadWorkingCopy>(
-                        id, m_services.composeCommandPort().loadWorkingCopy(sessionId));
+                        id, m_services.composeService().loadWorkingCopy(sessionId));
                 });
         case actions::ComposeStoreWorkingCopy::id.value:
             return dispatchDecoded<actions::ComposeStoreWorkingCopy>(
@@ -115,7 +116,7 @@ namespace javelin::app
                 [this, &id](const javelin::jmap::submission::DraftSnapshot& snapshot)
                 {
                     return acceptValue<actions::ComposeStoreWorkingCopy>(
-                        id, m_services.composeCommandPort().storeWorkingCopy(snapshot));
+                        id, m_services.composeService().storeWorkingCopy(snapshot));
                 });
         case actions::ComposeDiscard::id.value:
             return dispatchDecoded<actions::ComposeDiscard>(
@@ -123,7 +124,7 @@ namespace javelin::app
                 [this, &id](const std::string& sessionId)
                 {
                     return acceptValue<actions::ComposeDiscard>(
-                        id, m_services.composeCommandPort().discard(sessionId));
+                        id, m_services.composeService().discard(sessionId));
                 });
         default:
             return reject(id, QStringLiteral("The compose action is unsupported."),

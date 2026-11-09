@@ -4,6 +4,7 @@
 #include "app/MailApplicationTypes.h"
 #include "app/undo/HistoryTypes.h"
 #include "jmap/calendar/CalendarCommandTypes.h"
+#include "jmap/calendar/CalendarReader.h"
 
 #include <QCoroTask>
 
@@ -11,6 +12,24 @@
 
 namespace javelin::app
 {
+
+    class CalendarReadPort
+    {
+      public:
+        virtual ~CalendarReadPort() = default;
+
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarLoadResult>
+        loadCached(std::string accountId, javelin::jmap::calendar::VisibleInterval interval,
+                   javelin::jmap::calendar::TimeZoneId displayTimeZone) = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarAccountsResult>
+        accounts() = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarListResult>
+        calendars(std::string accountId) = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::ParticipantIdentityListResult>
+        participantIdentities(std::string accountId) = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::PendingCalendarInvitationsResult>
+        pendingInvitations() = 0;
+    };
 
     class CalendarCommandPort : public QObject
     {
@@ -60,7 +79,7 @@ namespace javelin::app
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         deleteCalendar(std::string ownerAccountId,
                        javelin::jmap::calendar::DeleteCalendarCommand command) = 0;
-        [[nodiscard]] virtual javelin::jmap::calendar::CalendarPreferenceResult
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarPreferenceResult>
         setCalendarVisible(std::string accountId, std::string calendarId, bool visible,
                            undo::CommandOrigin origin = undo::CommandOrigin::User) = 0;
 

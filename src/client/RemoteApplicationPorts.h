@@ -20,9 +20,10 @@
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkTaskPort.h"
 #include "client/RemoteActionClient.h"
-#include "jmap/calendar/CalendarReader.h"
 
 #include <QObject>
+
+#include <cstdint>
 
 namespace javelin::app
 {
@@ -32,31 +33,29 @@ namespace javelin::app
     {
       public:
         explicit RemoteAccountCommandPort(RemoteActionClient& client);
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
-                                const QStringList& knownAccountIds) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        removeConfiguredAccount(QString loginEmail, QString sessionUrl,
+                                QStringList knownAccountIds) override;
 
       private:
         RemoteActionClient& m_client;
     };
 
-    class RemoteCalendarReader final : public javelin::jmap::calendar::CalendarReader
+    class RemoteCalendarReader final : public CalendarReadPort
     {
       public:
         explicit RemoteCalendarReader(RemoteActionClient& client);
-        [[nodiscard]] javelin::jmap::calendar::CalendarLoadResult
-        loadCached(std::string_view accountId,
-                   const javelin::jmap::calendar::VisibleInterval& interval,
-                   const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const override;
-        [[nodiscard]] javelin::jmap::calendar::CalendarAccountsResult accounts() const override;
-        [[nodiscard]] javelin::jmap::calendar::CalendarListResult
-        calendars(std::string_view accountId) const override;
-        [[nodiscard]] javelin::jmap::calendar::ParticipantIdentityListResult
-        participantIdentities(std::string_view accountId) const override;
-        [[nodiscard]] javelin::jmap::calendar::PendingCalendarInvitationsResult
-        pendingInvitations() const override;
-        [[nodiscard]] javelin::jmap::calendar::CalendarEventReadResult
-        event(std::string_view accountId, std::string_view eventId) const override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarLoadResult>
+        loadCached(std::string accountId, javelin::jmap::calendar::VisibleInterval interval,
+                   javelin::jmap::calendar::TimeZoneId displayTimeZone) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarAccountsResult>
+        accounts() override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarListResult>
+        calendars(std::string accountId) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::ParticipantIdentityListResult>
+        participantIdentities(std::string accountId) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::PendingCalendarInvitationsResult>
+        pendingInvitations() override;
 
       private:
         RemoteActionClient& m_client;
@@ -107,7 +106,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         deleteCalendar(std::string ownerAccountId,
                        javelin::jmap::calendar::DeleteCalendarCommand command) override;
-        [[nodiscard]] javelin::jmap::calendar::CalendarPreferenceResult
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarPreferenceResult>
         setCalendarVisible(std::string accountId, std::string calendarId, bool visible,
                            undo::CommandOrigin origin) override;
 
@@ -140,13 +139,13 @@ namespace javelin::app
                      javelin::jmap::submission::ScheduledSendRequest request) override;
         [[nodiscard]] QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
         cancelDeferredSend(QString sendId) override;
-        [[nodiscard]] std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
-                                   javelin::jmap::OperationError>
-        loadWorkingCopy(std::string_view composeSessionId) const override;
-        [[nodiscard]] std::optional<javelin::jmap::OperationError>
-        storeWorkingCopy(const javelin::jmap::submission::DraftSnapshot& snapshot) override;
-        [[nodiscard]] std::optional<javelin::jmap::OperationError>
-        discard(std::string_view composeSessionId) override;
+        [[nodiscard]] QCoro::Task<std::variant<
+            std::optional<javelin::jmap::submission::DraftSnapshot>, javelin::jmap::OperationError>>
+        loadWorkingCopy(std::string composeSessionId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        storeWorkingCopy(javelin::jmap::submission::DraftSnapshot snapshot) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        discard(std::string composeSessionId) override;
 
       private:
         RemoteActionClient& m_client;
@@ -350,19 +349,22 @@ namespace javelin::app
                               QObject* parent = nullptr);
         [[nodiscard]] QCoro::Task<bool> undo() override;
         [[nodiscard]] QCoro::Task<bool> redo() override;
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        acknowledgeAndRemove(const QString& entryId) override;
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        forget(const QString& entryId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        acknowledgeAndRemove(QString entryId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        forget(QString entryId) override;
         [[nodiscard]] const undo::HistoryState& state() const override;
         [[nodiscard]] const std::vector<undo::HistoryEntry>& entries() const override;
 
       private:
-        void refreshSnapshot();
+        [[nodiscard]] QCoro::Task<> refreshSnapshot();
+
         GuiDaemonSession& m_session;
         RemoteActionClient& m_client;
         undo::HistoryState m_state;
         std::vector<undo::HistoryEntry> m_entries;
+        std::uint64_t m_requestedSnapshot = 0;
+        std::uint64_t m_appliedSnapshot = 0;
     };
 
     class RemoteDeveloperDiagnosticsPort final : public DeveloperDiagnosticsPort
@@ -397,27 +399,32 @@ namespace javelin::app
         void clear() override;
 
       private:
-        void setRemoteSubscribed(bool subscribed);
+        [[nodiscard]] QCoro::Task<> clearRemote();
+        [[nodiscard]] QCoro::Task<> synchronizeRemoteSubscription();
 
         GuiDaemonSession& m_session;
         RemoteActionClient& m_client;
         QVector<LogEntry> m_entries;
         std::size_t m_subscribers = 0;
+        std::uint64_t m_connectionEpoch = 0;
+        bool m_remoteSubscribed = false;
+        bool m_subscriptionInFlight = false;
     };
 
     class RemoteWorkTaskPort final : public WorkTaskPort
     {
       public:
         RemoteWorkTaskPort(GuiDaemonSession& session, RemoteActionClient& client);
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        pause(std::string_view jobId) override;
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        resume(std::string_view jobId) override;
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        retry(std::string_view jobId) override;
-        [[nodiscard]] std::variant<std::vector<WorkRecord>, javelin::jmap::cache::DatabaseError>
-        list() const override;
-        [[nodiscard]] QString summary() const override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        pause(std::string jobId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        resume(std::string jobId) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        retry(std::string jobId) override;
+        [[nodiscard]] QCoro::Task<
+            std::variant<std::vector<WorkRecord>, javelin::jmap::cache::DatabaseError>>
+        list() override;
+        [[nodiscard]] QCoro::Task<QString> summary() override;
         [[nodiscard]] QMetaObject::Connection
         connectChanged(QObject* context, std::function<void()> callback) override;
 

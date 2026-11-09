@@ -217,12 +217,12 @@ namespace javelin::app
         return m_service.deleteCalendar(std::move(ownerAccountId), std::move(command));
     }
 
-    javelin::jmap::calendar::CalendarPreferenceResult
+    QCoro::Task<javelin::jmap::calendar::CalendarPreferenceResult>
     CalendarCommandService::setCalendarVisible(std::string accountId, std::string calendarId,
                                                const bool visible, const undo::CommandOrigin origin)
     {
-        return m_service.setCalendarVisible(std::move(accountId), std::move(calendarId), visible,
-                                            origin);
+        co_return m_service.setCalendarVisible(std::move(accountId), std::move(calendarId), visible,
+                                               origin);
     }
 
 } // namespace javelin::app

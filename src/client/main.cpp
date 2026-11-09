@@ -20,6 +20,8 @@
 #include "gui/shell/MainWindow.h"
 #include "gui/tasks/TaskCenterDialog.h"
 
+#include <QCoroTask>
+
 #include <KAboutData>
 #include <KAboutLicense>
 #include <KLocalizedString>
@@ -46,6 +48,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -581,14 +584,21 @@ int main(int argc, char* argv[])
         taskButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
         taskButton->setToolTip(i18n("Open Task Center"));
         mainWindow->statusBar()->addPermanentWidget(taskButton);
-        const auto updateTaskButton = [&, taskButton]
+        const auto taskSummaryGeneration = std::make_shared<std::uint64_t>(0);
+        const auto updateTaskButton = [&, taskButton, taskSummaryGeneration]
         {
             if (!services || mainWindow == nullptr)
                 return;
-            const QString summary = services->workTaskPort().summary();
-            taskButton->setText(summary);
-            taskButton->setAccessibleName(summary);
-            taskButton->setVisible(!summary.isEmpty());
+            const auto generation = ++*taskSummaryGeneration;
+            QCoro::connect(services->workTaskPort().summary(), taskButton,
+                           [taskButton, taskSummaryGeneration, generation](const QString& summary)
+                           {
+                               if (generation != *taskSummaryGeneration)
+                                   return;
+                               taskButton->setText(summary);
+                               taskButton->setAccessibleName(summary);
+                               taskButton->setVisible(!summary.isEmpty());
+                           });
         };
         QObject::connect(taskButton, &QToolButton::clicked, mainWindow,
                          [&showTaskCenter] { showTaskCenter(); });

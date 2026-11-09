@@ -45,33 +45,8 @@ namespace javelin::app
         explicit RemoteActionClient(GuiDaemonSession& session, QObject* parent = nullptr);
         ~RemoteActionClient() override;
 
-        [[nodiscard]] RawResult invokeImmediate(javelin::protocol::ActionId action,
-                                                QByteArray payload);
         [[nodiscard]] QFuture<RawResult> invoke(javelin::protocol::ActionId action,
                                                 QByteArray payload);
-
-        template <typename Action, typename... Arguments>
-        [[nodiscard]] DecodedRemoteResult<typename Action::Result>
-        callImmediate(const Arguments&... arguments)
-        {
-            static_assert(std::same_as<typename Action::Request,
-                                       std::tuple<std::remove_cvref_t<Arguments>...>>,
-                          "Remote action arguments do not match the descriptor request type");
-            auto encoded = remote::encodeVersioned<Action::requestSchemaVersion>(arguments...);
-            if (const auto* error = std::get_if<remote::CodecError>(&encoded))
-                return RemoteCallError{.detail = error->message};
-            auto raw = invokeImmediate(Action::id, std::get<QByteArray>(std::move(encoded)));
-            if (const auto* error = std::get_if<RemoteCallError>(&raw))
-                return *error;
-            using Result = typename Action::Result;
-            auto decoded = remote::decodeVersionedValue<Action::resultSchemaVersion, Result>(
-                std::get<QByteArray>(raw));
-            if (const auto* error = std::get_if<remote::CodecError>(&decoded))
-                return RemoteCallError{.code =
-                                           javelin::protocol::BoundaryErrorCode::ProtocolViolation,
-                                       .detail = error->message};
-            return std::get<Result>(std::move(decoded));
-        }
 
         template <typename Action, typename... Arguments>
         [[nodiscard]] QCoro::Task<DecodedRemoteResult<typename Action::Result>>

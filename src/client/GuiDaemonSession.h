@@ -79,18 +79,12 @@ namespace javelin::app
         connectSettingsChanged(QObject* context, std::function<void()> callback) override;
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         requestAccountRefresh(const QString& accountId);
-        [[nodiscard]] javelin::protocol::CommandReply
-        submitRemoteAction(javelin::protocol::ActionId action, QByteArray payload,
-                           javelin::protocol::CommandId id = {.value = QUuid::createUuid()});
         [[nodiscard]] QFuture<javelin::protocol::CommandReply>
         submitRemoteActionAsync(javelin::protocol::ActionId action, QByteArray payload,
                                 javelin::protocol::CommandId id = {.value = QUuid::createUuid()});
         [[nodiscard]] CacheAccessBarrier::ParticipantId
         registerCacheParticipant(CacheAccessBarrier::Participant participant);
         void unregisterCacheParticipant(CacheAccessBarrier::ParticipantId participant);
-        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
-        requestMailboxWindow(const QString& accountId, const QString& mailboxId,
-                             std::uint64_t offset = 0, std::uint32_t limit = 100);
         [[nodiscard]] const QString& databasePath() const;
         [[nodiscard]] bool readConnectionOpen() const;
 
@@ -141,7 +135,6 @@ namespace javelin::app
         [[nodiscard]] std::optional<GuiBootstrapError> openReadConnection();
         [[nodiscard]] std::optional<GuiBootstrapError> suspendReadAccess();
         [[nodiscard]] std::optional<GuiBootstrapError> resumeReadAccess();
-        void cancelMaterializationScope();
         void beginRecovery(const QString& detail);
         void onDaemonDisconnected(javelin::protocol::SocketDisconnectReason reason,
                                   const QString& detail);
@@ -157,7 +150,6 @@ namespace javelin::app
         CacheAccessBarrier m_cacheAccessBarrier;
         CacheAccessBarrier::ParticipantId m_cacheParticipant = 0;
         std::uint64_t m_currentEpoch = 0;
-        std::optional<javelin::protocol::ScopeId> m_materializationScope;
         std::optional<PendingBootstrap> m_pendingBootstrap;
         bool m_inRecovery = false;
     };

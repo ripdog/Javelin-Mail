@@ -7,7 +7,6 @@
 #include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/settings/GuiSettings.h"
-#include "jmap/calendar/CalendarReader.h"
 
 #include <KDatePicker>
 #include <KMessageWidget>
@@ -32,23 +31,22 @@
 
 namespace
 {
-    class Reader final : public javelin::jmap::calendar::CalendarReader
+    class Reader final : public javelin::app::CalendarReadPort
     {
       public:
         bool writable = true;
         std::vector<javelin::jmap::calendar::CalendarEvent> cachedEvents;
         std::vector<javelin::jmap::calendar::Occurrence> cachedOccurrences;
-        mutable int accountReadCount = 0;
-        mutable int calendarReadCount = 0;
+        int accountReadCount = 0;
+        int calendarReadCount = 0;
 
-        javelin::jmap::calendar::CalendarLoadResult
-        loadCached(const std::string_view accountId,
-                   const javelin::jmap::calendar::VisibleInterval& interval,
-                   const javelin::jmap::calendar::TimeZoneId& displayTimeZone) const override
+        QCoro::Task<javelin::jmap::calendar::CalendarLoadResult>
+        loadCached(std::string accountId, javelin::jmap::calendar::VisibleInterval interval,
+                   javelin::jmap::calendar::TimeZoneId displayTimeZone) override
         {
-            return std::optional<javelin::jmap::cache::CalendarWindow>{
+            co_return std::optional<javelin::jmap::cache::CalendarWindow>{
                 javelin::jmap::cache::CalendarWindow{
-                    .accountId = std::string{accountId},
+                    .accountId = accountId,
                     .start = interval.start,
                     .end = interval.end,
                     .displayTimeZone = displayTimeZone,
@@ -59,22 +57,22 @@ namespace
                 }};
         }
 
-        javelin::jmap::calendar::CalendarAccountsResult accounts() const override
+        QCoro::Task<javelin::jmap::calendar::CalendarAccountsResult> accounts() override
         {
             ++accountReadCount;
-            return std::vector<javelin::jmap::cache::CalendarAccount>{{
+            co_return std::vector<javelin::jmap::cache::CalendarAccount>{{
                 .ownerAccountId = "owner-1",
                 .accountId = "calendar-1",
                 .name = "Personal",
             }};
         }
 
-        javelin::jmap::calendar::CalendarListResult
-        calendars(const std::string_view accountId) const override
+        QCoro::Task<javelin::jmap::calendar::CalendarListResult>
+        calendars(std::string accountId) override
         {
             ++calendarReadCount;
-            return std::vector<javelin::jmap::calendar::Calendar>{{
-                .accountId = std::string{accountId},
+            co_return std::vector<javelin::jmap::calendar::Calendar>{{
+                .accountId = accountId,
                 .id = "cal-1",
                 .name = "Personal",
                 .description = std::nullopt,
@@ -97,22 +95,16 @@ namespace
             }};
         }
 
-        javelin::jmap::calendar::ParticipantIdentityListResult
-        participantIdentities(std::string_view) const override
+        QCoro::Task<javelin::jmap::calendar::ParticipantIdentityListResult>
+        participantIdentities(std::string) override
         {
-            return std::vector<javelin::jmap::calendar::ParticipantIdentity>{};
+            co_return std::vector<javelin::jmap::calendar::ParticipantIdentity>{};
         }
 
-        javelin::jmap::calendar::PendingCalendarInvitationsResult
-        pendingInvitations() const override
+        QCoro::Task<javelin::jmap::calendar::PendingCalendarInvitationsResult>
+        pendingInvitations() override
         {
-            return std::vector<javelin::jmap::calendar::PendingCalendarInvitation>{};
-        }
-
-        javelin::jmap::calendar::CalendarEventReadResult event(std::string_view,
-                                                               std::string_view) const override
-        {
-            return std::optional<javelin::jmap::calendar::CalendarEvent>{};
+            co_return std::vector<javelin::jmap::calendar::PendingCalendarInvitation>{};
         }
     };
 
@@ -252,11 +244,11 @@ namespace
             co_return committed(command.accountId);
         }
 
-        javelin::jmap::calendar::CalendarPreferenceResult
+        QCoro::Task<javelin::jmap::calendar::CalendarPreferenceResult>
         setCalendarVisible(std::string, std::string, bool,
                            javelin::app::undo::CommandOrigin) override
         {
-            return std::monostate{};
+            co_return std::monostate{};
         }
 
       private:

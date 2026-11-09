@@ -61,22 +61,22 @@ namespace
             co_return true;
         }
 
-        std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
-                     javelin::jmap::OperationError>
-        loadWorkingCopy(std::string_view) const override
+        QCoro::Task<std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
+                                 javelin::jmap::OperationError>>
+        loadWorkingCopy(std::string) override
         {
-            return std::optional<javelin::jmap::submission::DraftSnapshot>{};
+            co_return std::optional<javelin::jmap::submission::DraftSnapshot>{};
         }
 
-        std::optional<javelin::jmap::OperationError>
-        storeWorkingCopy(const javelin::jmap::submission::DraftSnapshot&) override
+        QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        storeWorkingCopy(javelin::jmap::submission::DraftSnapshot) override
         {
-            return std::nullopt;
+            co_return std::nullopt;
         }
 
-        std::optional<javelin::jmap::OperationError> discard(std::string_view) override
+        QCoro::Task<std::optional<javelin::jmap::OperationError>> discard(std::string) override
         {
-            return std::nullopt;
+            co_return std::nullopt;
         }
 
         QString cancelledSendId;

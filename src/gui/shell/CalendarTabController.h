@@ -11,22 +11,21 @@
 #include <QList>
 #include <QObject>
 #include <QPoint>
+#include <QPointer>
 #include <QString>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 class QAction;
 class QMenu;
 class QStackedWidget;
 class QWidget;
-
-namespace javelin::jmap::calendar
-{
-    class CalendarReader;
-}
 
 namespace javelin::gui::calendar
 {
@@ -75,13 +74,22 @@ namespace javelin::gui::shell
                                const CalendarWorkspaceState&) = default;
     };
 
+    struct CalendarViewSnapshot
+    {
+        QDate start;
+        QDate end;
+        std::unordered_map<std::string, javelin::jmap::cache::CalendarWindow> windows;
+        std::optional<std::vector<javelin::jmap::calendar::PendingCalendarInvitation>>
+            pendingInvitations;
+    };
+
     class CalendarTabController final : public QObject
     {
         Q_OBJECT
 
       public:
         CalendarTabController(javelin::gui::settings::GuiSettings& settings,
-                              javelin::jmap::calendar::CalendarReader& calendarReader,
+                              javelin::app::CalendarReadPort& calendarReader,
                               javelin::app::CalendarCommandPort& calendarCommandPort,
                               QStackedWidget& contentStack, std::vector<TabState>& tabs,
                               QObject* parent = nullptr);
@@ -94,6 +102,8 @@ namespace javelin::gui::shell
         [[nodiscard]] const CalendarWorkspaceState& workspaceState() const;
         [[nodiscard]] bool refresh(const TabState* tab);
         void accountsChanged();
+        // Completes once calendar accounts have been read at least once.
+        [[nodiscard]] QCoro::Task<> ensureAccountsLoaded();
         [[nodiscard]] bool close(TabState& tab);
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;
         [[nodiscard]] QMenu* calendarMenuForTab(const TabState* tab) const;
@@ -108,12 +118,57 @@ namespace javelin::gui::shell
         void operationFailed(javelin::jmap::OperationError error);
 
       private:
+        enum class AccountSnapshotState
+        {
+            Unloaded,
+            Loaded,
+            Failed,
+        };
+
+        struct CalendarEventTarget
+        {
+            QString accountId;
+            QString eventId;
+            QString recurrenceId;
+        };
+
+        struct PendingCalendarOpen
+        {
+            std::optional<QDate> displayedMonth;
+            std::optional<CalendarEventTarget> event;
+        };
+
+        struct PendingDayAgenda
+        {
+            QDate date;
+            CalendarEventTarget event;
+        };
+
         [[nodiscard]] CalendarWorkspaceState calculateWorkspaceState() const;
-        void refreshWorkspaceState();
+        void setWorkspaceState(CalendarWorkspaceState state);
         [[nodiscard]] javelin::gui::calendar::MonthCalendarWidget*
         widgetForTab(const TabState* tab) const;
+        [[nodiscard]] javelin::gui::calendar::MonthCalendarWidget* calendarWidget() const;
+        [[nodiscard]] QCoro::Task<> loadAccountSnapshot();
+        [[nodiscard]] QCoro::Task<>
+        refreshAccountsAndRange(QPointer<javelin::gui::calendar::MonthCalendarWidget> widget);
+        void showCalendar(PendingCalendarOpen request);
+        void createCalendarTab(PendingCalendarOpen request);
+        void focusRequest(javelin::gui::calendar::MonthCalendarWidget& widget,
+                          const PendingCalendarOpen& request);
+        void showCalendarAccounts(javelin::gui::calendar::MonthCalendarWidget& widget) const;
+        void reloadView(javelin::gui::calendar::MonthCalendarWidget& widget);
+        [[nodiscard]] QCoro::Task<>
+        loadView(QPointer<javelin::gui::calendar::MonthCalendarWidget> widget);
+        void presentView(javelin::gui::calendar::MonthCalendarWidget& widget);
         [[nodiscard]] bool
-        refreshAccountSnapshot(javelin::gui::calendar::MonthCalendarWidget& widget);
+        viewMatches(const javelin::gui::calendar::MonthCalendarWidget& widget) const;
+        [[nodiscard]] const std::vector<javelin::jmap::calendar::Calendar>*
+        calendarsFor(const std::string& accountId) const;
+        [[nodiscard]] const std::vector<javelin::jmap::calendar::ParticipantIdentity>*
+        identitiesFor(const std::string& accountId) const;
+        [[nodiscard]] const javelin::jmap::cache::CalendarWindow*
+        windowFor(const std::string& accountId) const;
         void requestVisibleRange(javelin::gui::calendar::MonthCalendarWidget& widget,
                                  const QDate& start, const QDate& end, bool forceRefresh = false);
         void showEventContextMenu(javelin::gui::calendar::MonthCalendarWidget& widget,
@@ -126,11 +181,26 @@ namespace javelin::gui::shell
                                       const QString& targetCalendarId);
         void configureEventDialog(javelin::gui::calendar::EventDialog& dialog);
         javelin::gui::settings::GuiSettings& m_settings;
-        javelin::jmap::calendar::CalendarReader& m_calendarReader;
+        javelin::app::CalendarReadPort& m_calendarReader;
         javelin::app::CalendarCommandPort& m_calendarCommandPort;
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;
+        // Account, calendar, and identity reads settle together; a newer read never yields to
+        // an older one that completes later.
+        AccountSnapshotState m_accountSnapshotState = AccountSnapshotState::Unloaded;
+        std::uint64_t m_requestedAccountSnapshot = 0;
+        std::uint64_t m_appliedAccountSnapshot = 0;
         std::vector<javelin::jmap::cache::CalendarAccount> m_calendarAccounts;
+        std::unordered_map<std::string, std::vector<javelin::jmap::calendar::Calendar>>
+            m_accountCalendars;
+        std::unordered_map<std::string, std::vector<javelin::jmap::calendar::ParticipantIdentity>>
+            m_accountIdentities;
+        std::optional<PendingCalendarOpen> m_pendingOpen;
+        // The cached range the calendar widget currently presents; menus, dialogs, and agenda
+        // views read it so they act on exactly what is displayed.
+        std::optional<CalendarViewSnapshot> m_view;
+        std::uint64_t m_viewGeneration = 0;
+        std::optional<PendingDayAgenda> m_pendingDayAgenda;
         CalendarWorkspaceState m_workspaceState;
         std::function<std::vector<QString>()> m_configuredEventContextMenuLayout;
         std::optional<CalendarEventContextActions> m_eventContextActions;

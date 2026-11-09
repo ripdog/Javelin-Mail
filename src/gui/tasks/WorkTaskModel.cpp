@@ -2,6 +2,8 @@
 
 #include <KLocalizedString>
 
+#include <QPointer>
+
 #include <algorithm>
 #include <chrono>
 
@@ -120,10 +122,20 @@ namespace javelin::app
 
     void WorkTaskModel::reload()
     {
-        const auto result = m_taskPort.list();
+        QCoro::connect(loadRecords(), this, [] {});
+    }
+
+    QCoro::Task<> WorkTaskModel::loadRecords()
+    {
+        const QPointer<WorkTaskModel> self{this};
+        const auto generation = ++m_reloadGeneration;
+        const auto result = co_await m_taskPort.list();
+        // Only the newest listing may replace the rows.
+        if (!self || generation != m_reloadGeneration)
+            co_return;
         const auto* records = std::get_if<std::vector<WorkRecord>>(&result);
         if (records == nullptr)
-            return;
+            co_return;
         const bool sameRows =
             m_records.size() == records->size() &&
             std::ranges::equal(m_records, *records, {}, &WorkRecord::jobId, &WorkRecord::jobId);
@@ -132,7 +144,7 @@ namespace javelin::app
             beginResetModel();
             m_records = *records;
             endResetModel();
-            return;
+            co_return;
         }
         m_records = *records;
         if (!m_records.empty())

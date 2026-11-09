@@ -6,11 +6,14 @@
 #include "jmap/OperationError.h"
 #include "jmap/submission/ComposeTypes.h"
 
+#include <QCoroTask>
+
 #include <QObject>
 #include <QString>
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <vector>
 
 class QMenu;
@@ -72,12 +75,15 @@ namespace javelin::gui::shell
                              QObject* parent = nullptr);
 
         void open(javelin::jmap::submission::OpenComposeRequest request);
-        [[nodiscard]] bool restore(const PersistedComposeTab& persisted);
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::submission::DraftSnapshot>>
+        loadRestoredWorkingCopy(std::string composeSessionId);
+        void restore(const PersistedComposeTab& persisted,
+                     javelin::jmap::submission::DraftSnapshot snapshot);
 
         [[nodiscard]] std::optional<ComposeTabCloseInput> closeInput(int index) const;
         [[nodiscard]] QString confirmationDetails(int index) const;
         [[nodiscard]] bool closeImmediately(int index);
-        [[nodiscard]] bool discardAndClose(int index);
+        void discardAndClose(int index);
         void saveDraftAndClose(int index);
 
         void sendMessage(const TabState* tab);

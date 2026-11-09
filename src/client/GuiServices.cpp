@@ -16,7 +16,6 @@
 #include "jmap/cache/MailTagReadRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
-#include "jmap/calendar/CalendarReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/render/InlineMessageUrl.h"
 
@@ -238,7 +237,7 @@ namespace javelin::app
     {
         return *m_contactRepository;
     }
-    javelin::jmap::calendar::CalendarReader& GuiServices::calendarReader()
+    CalendarReadPort& GuiServices::calendarReader()
     {
         return *m_calendarReader;
     }

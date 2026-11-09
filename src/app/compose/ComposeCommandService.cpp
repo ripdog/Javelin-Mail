@@ -54,23 +54,23 @@ namespace javelin::app
         co_return m_service.cancelDeferredSend(sendId);
     }
 
-    std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
-                 javelin::jmap::OperationError>
-    ComposeCommandService::loadWorkingCopy(std::string_view composeSessionId) const
+    QCoro::Task<std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
+                             javelin::jmap::OperationError>>
+    ComposeCommandService::loadWorkingCopy(std::string composeSessionId)
     {
-        return m_service.loadWorkingCopy(composeSessionId);
+        co_return m_service.loadWorkingCopy(composeSessionId);
     }
 
-    std::optional<javelin::jmap::OperationError> ComposeCommandService::storeWorkingCopy(
-        const javelin::jmap::submission::DraftSnapshot& snapshot)
+    QCoro::Task<std::optional<javelin::jmap::OperationError>>
+    ComposeCommandService::storeWorkingCopy(javelin::jmap::submission::DraftSnapshot snapshot)
     {
-        return m_service.storeWorkingCopy(snapshot);
+        co_return m_service.storeWorkingCopy(snapshot);
     }
 
-    std::optional<javelin::jmap::OperationError>
-    ComposeCommandService::discard(const std::string_view composeSessionId)
+    QCoro::Task<std::optional<javelin::jmap::OperationError>>
+    ComposeCommandService::discard(std::string composeSessionId)
     {
-        return m_service.discard(composeSessionId);
+        co_return m_service.discard(composeSessionId);
     }
 
 } // namespace javelin::app

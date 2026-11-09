@@ -3,6 +3,8 @@
 #include "app/WorkTaskPort.h"
 #include "gui/tasks/WorkTaskModel.h"
 
+#include <QCoroTask>
+
 #include <KLocalizedString>
 
 #include <QApplication>
@@ -135,13 +137,19 @@ namespace javelin::gui::tasks
                 switch (actionForRecord(*record))
                 {
                 case RowAction::Pause:
-                    static_cast<void>(m_taskPort.pause(jobId));
+                    QCoro::connect(
+                        m_taskPort.pause(jobId), this,
+                        [](const std::optional<javelin::jmap::cache::DatabaseError>&) {});
                     return true;
                 case RowAction::Resume:
-                    static_cast<void>(m_taskPort.resume(jobId));
+                    QCoro::connect(
+                        m_taskPort.resume(jobId), this,
+                        [](const std::optional<javelin::jmap::cache::DatabaseError>&) {});
                     return true;
                 case RowAction::Retry:
-                    static_cast<void>(m_taskPort.retry(jobId));
+                    QCoro::connect(
+                        m_taskPort.retry(jobId), this,
+                        [](const std::optional<javelin::jmap::cache::DatabaseError>&) {});
                     return true;
                 case RowAction::None:
                     return false;

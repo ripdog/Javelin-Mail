@@ -17,9 +17,9 @@ namespace javelin::app
       public:
         explicit AccountCommandService(javelin::jmap::cache::AccountRepository& repository);
 
-        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
-                                const QStringList& knownAccountIds) override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+        removeConfiguredAccount(QString loginEmail, QString sessionUrl,
+                                QStringList knownAccountIds) override;
 
       private:
         javelin::jmap::cache::AccountRepository& m_repository;

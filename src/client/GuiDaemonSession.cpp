@@ -342,7 +342,6 @@ namespace javelin::app
 
     void GuiDaemonSession::stop()
     {
-        cancelMaterializationScope();
         if (m_client != nullptr)
             m_client->disconnectFromDaemon();
         m_readConnection = javelin::jmap::cache::ReadOnlyDatabaseConnection{};
@@ -423,17 +422,6 @@ namespace javelin::app
         return std::nullopt;
     }
 
-    protocol::CommandReply GuiDaemonSession::submitRemoteAction(const protocol::ActionId action,
-                                                                QByteArray payload,
-                                                                const protocol::CommandId id)
-    {
-        return m_client->submitCommand({
-            .id = id,
-            .command =
-                protocol::RemoteActionCommand{.action = action, .payload = std::move(payload)},
-        });
-    }
-
     QFuture<protocol::CommandReply>
     GuiDaemonSession::submitRemoteActionAsync(const protocol::ActionId action, QByteArray payload,
                                               const protocol::CommandId id)
@@ -455,31 +443,6 @@ namespace javelin::app
         const CacheAccessBarrier::ParticipantId participant)
     {
         m_cacheAccessBarrier.unregisterParticipant(participant);
-    }
-
-    std::optional<protocol::BoundaryError>
-    GuiDaemonSession::requestMailboxWindow(const QString& accountId, const QString& mailboxId,
-                                           const std::uint64_t offset, const std::uint32_t limit)
-    {
-        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("materialization_admission"),
-                                QStringLiteral("offset=%1 limit=%2").arg(offset).arg(limit)};
-        cancelMaterializationScope();
-        const auto scope = protocol::ScopeId{.value = QUuid::createUuid()};
-        const auto reply = m_client->requestMaterialization(
-            {.id = protocol::RequestId{.value = QUuid::createUuid()},
-             .scope = scope,
-             .request = protocol::MailboxWindowMaterialization{.accountId = accountId,
-                                                               .mailboxId = mailboxId,
-                                                               .offset = offset,
-                                                               .limit = limit}});
-        if (const auto* rejected = std::get_if<protocol::MaterializationRejected>(&reply))
-        {
-            metrics.finish(QStringLiteral("rejected"));
-            return rejected->error;
-        }
-        m_materializationScope = scope;
-        metrics.finish(QStringLiteral("accepted"));
-        return std::nullopt;
     }
 
     const QString& GuiDaemonSession::databasePath() const
@@ -780,15 +743,6 @@ namespace javelin::app
         if (const auto error = m_cacheAccessBarrier.resume())
             return detailError(GuiBootstrapErrorCode::CacheBarrierFailed, error->message);
         return std::nullopt;
-    }
-
-    void GuiDaemonSession::cancelMaterializationScope()
-    {
-        if (!m_materializationScope.has_value())
-            return;
-        if (m_client != nullptr && m_client->isConnected())
-            m_client->cancelMaterializationScope(*m_materializationScope);
-        m_materializationScope.reset();
     }
 
     void GuiDaemonSession::beginRecovery(const QString& detail)

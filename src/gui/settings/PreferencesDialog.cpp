@@ -855,11 +855,20 @@ namespace javelin::gui::settings
 
         for (const auto& account : m_removedAccounts)
         {
-            if (const auto error = m_accountCommandPort.removeConfiguredAccount(
-                    account.loginEmail, account.sessionUrl, account.cachedAccountIds))
-            {
-                QMessageBox::critical(this, i18n("Could not remove account cache"), error->message);
-            }
+            // Removal outlives this dialog; report a failure against the window that opened it.
+            QPointer<QWidget> removalParent{parentWidget()};
+            auto task = m_accountCommandPort.removeConfiguredAccount(
+                account.loginEmail, account.sessionUrl, account.cachedAccountIds);
+            QCoro::connect(std::move(task), QCoreApplication::instance(),
+                           [removalParent](std::optional<javelin::jmap::cache::DatabaseError> error)
+                           {
+                               if (error.has_value() && removalParent != nullptr)
+                               {
+                                   QMessageBox::critical(removalParent,
+                                                         i18n("Could not remove account cache"),
+                                                         error->message);
+                               }
+                           });
         }
 
         std::vector<MailboxCacheClearRequest> cacheClearRequests;

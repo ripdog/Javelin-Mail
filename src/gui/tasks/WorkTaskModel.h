@@ -2,9 +2,12 @@
 
 #include "app/WorkTaskPort.h"
 
+#include <QCoroTask>
+
 #include <QAbstractTableModel>
 #include <QTimer>
 
+#include <cstdint>
 #include <vector>
 
 namespace javelin::app
@@ -27,8 +30,11 @@ namespace javelin::app
         void reload();
 
       private:
+        [[nodiscard]] QCoro::Task<> loadRecords();
+
         WorkTaskPort& m_taskPort;
         std::vector<WorkRecord> m_records;
         QTimer m_reloadTimer;
+        std::uint64_t m_reloadGeneration = 0;
     };
 } // namespace javelin::app

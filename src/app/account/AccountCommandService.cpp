@@ -10,11 +10,10 @@ namespace javelin::app
     {
     }
 
-    std::optional<javelin::jmap::cache::DatabaseError>
-    AccountCommandService::removeConfiguredAccount(const QString& loginEmail,
-                                                   const QString& sessionUrl,
-                                                   const QStringList& knownAccountIds)
+    QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+    AccountCommandService::removeConfiguredAccount(QString loginEmail, QString sessionUrl,
+                                                   QStringList knownAccountIds)
     {
-        return m_repository.removeConfiguredAccount(loginEmail, sessionUrl, knownAccountIds);
+        co_return m_repository.removeConfiguredAccount(loginEmail, sessionUrl, knownAccountIds);
     }
 } // namespace javelin::app

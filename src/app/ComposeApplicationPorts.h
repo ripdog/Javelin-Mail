@@ -42,13 +42,13 @@ namespace javelin::app
                      javelin::jmap::submission::ScheduledSendRequest request) = 0;
         [[nodiscard]] virtual QCoro::Task<std::variant<bool, javelin::jmap::OperationError>>
         cancelDeferredSend(QString sendId) = 0;
-        [[nodiscard]] virtual std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>,
-                                           javelin::jmap::OperationError>
-        loadWorkingCopy(std::string_view composeSessionId) const = 0;
-        [[nodiscard]] virtual std::optional<javelin::jmap::OperationError>
-        storeWorkingCopy(const javelin::jmap::submission::DraftSnapshot& snapshot) = 0;
-        [[nodiscard]] virtual std::optional<javelin::jmap::OperationError>
-        discard(std::string_view composeSessionId) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::variant<
+            std::optional<javelin::jmap::submission::DraftSnapshot>, javelin::jmap::OperationError>>
+        loadWorkingCopy(std::string composeSessionId) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        storeWorkingCopy(javelin::jmap::submission::DraftSnapshot snapshot) = 0;
+        [[nodiscard]] virtual QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        discard(std::string composeSessionId) = 0;
     };
 
 } // namespace javelin::app

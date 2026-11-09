@@ -1,6 +1,7 @@
 #include "daemon/actions/DaemonRemoteActionDispatcher.h"
 
 #include "app/CalendarApplicationPorts.h"
+#include "app/CalendarApplicationService.h"
 #include "daemon/DaemonServices.h"
 #include "jmap/calendar/CalendarReader.h"
 
@@ -185,7 +186,7 @@ namespace javelin::app
                             const undo::CommandOrigin origin)
                 {
                     return acceptValue<actions::CalendarSetVisible>(
-                        id, m_services.calendarCommandPort().setCalendarVisible(
+                        id, m_services.calendarApplicationService().setCalendarVisible(
                                 std::move(accountId), std::move(calendarId), visible, origin));
                 });
         default:

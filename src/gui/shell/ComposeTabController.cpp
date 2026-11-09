@@ -15,6 +15,7 @@
 #include <KLocalizedString>
 
 #include <QDebug>
+#include <QPointer>
 #include <QStackedWidget>
 
 #include <string_view>
@@ -88,22 +89,26 @@ namespace javelin::gui::shell
             });
     }
 
-    bool ComposeTabController::restore(const PersistedComposeTab& persisted)
+    QCoro::Task<std::optional<javelin::jmap::submission::DraftSnapshot>>
+    ComposeTabController::loadRestoredWorkingCopy(std::string composeSessionId)
     {
-        const auto draftResult = m_composeCommandPort.loadWorkingCopy(persisted.composeSessionId);
+        const QPointer<ComposeTabController> self{this};
+        auto draftResult =
+            co_await m_composeCommandPort.loadWorkingCopy(std::move(composeSessionId));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftResult))
         {
-            Q_EMIT operationFailed(*error);
-            return false;
+            if (self)
+                Q_EMIT operationFailed(*error);
+            co_return std::nullopt;
         }
+        co_return std::get<std::optional<javelin::jmap::submission::DraftSnapshot>>(
+            std::move(draftResult));
+    }
 
-        const auto& snapshot =
-            std::get<std::optional<javelin::jmap::submission::DraftSnapshot>>(draftResult);
-        if (!snapshot.has_value())
-            return false;
-
-        static_cast<void>(materialize(*snapshot, persisted.hasUnsavedChanges));
-        return true;
+    void ComposeTabController::restore(const PersistedComposeTab& persisted,
+                                       javelin::jmap::submission::DraftSnapshot snapshot)
+    {
+        static_cast<void>(materialize(std::move(snapshot), persisted.hasUnsavedChanges));
     }
 
     std::optional<ComposeTabCloseInput> ComposeTabController::closeInput(const int index) const
@@ -134,18 +139,11 @@ namespace javelin::gui::shell
         return detachWidget(index);
     }
 
-    bool ComposeTabController::discardAndClose(const int index)
+    void ComposeTabController::discardAndClose(const int index)
     {
         auto* composeTab = composeTabAt(index);
-        if (composeTab == nullptr || composeTab->widget == nullptr)
-            return false;
-
-        if (const auto error = m_composeCommandPort.discard(composeTab->widget->composeSessionId()))
-        {
-            Q_EMIT operationFailed(*error);
-            return false;
-        }
-        return detachWidget(index);
+        if (composeTab != nullptr && composeTab->widget != nullptr)
+            composeTab->widget->discardAndClose();
     }
 
     void ComposeTabController::saveDraftAndClose(const int index)
@@ -319,6 +317,8 @@ namespace javelin::gui::shell
                 &ComposeTabController::manageIdentitiesRequested);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::userInterventionRequired, this,
                 &ComposeTabController::userInterventionRequired);
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::discardFailed, this,
+                &ComposeTabController::operationFailed);
         connect(widget, &javelin::gui::compose::ComposeTabWidget::closeRequested, this,
                 [this, widget]
                 {

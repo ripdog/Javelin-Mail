@@ -26,16 +26,16 @@ namespace javelin::app
         return m_manager.redo();
     }
 
-    std::optional<javelin::jmap::cache::DatabaseError>
-    UndoCommandService::acknowledgeAndRemove(const QString& entryId)
+    QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+    UndoCommandService::acknowledgeAndRemove(QString entryId)
     {
-        return m_manager.acknowledgeAndRemove(entryId);
+        co_return m_manager.acknowledgeAndRemove(entryId);
     }
 
-    std::optional<javelin::jmap::cache::DatabaseError>
-    UndoCommandService::forget(const QString& entryId)
+    QCoro::Task<std::optional<javelin::jmap::cache::DatabaseError>>
+    UndoCommandService::forget(QString entryId)
     {
-        return m_manager.forget(entryId);
+        co_return m_manager.forget(entryId);
     }
 
     const undo::HistoryState& UndoCommandService::state() const
