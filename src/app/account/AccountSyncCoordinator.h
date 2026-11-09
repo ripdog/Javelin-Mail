@@ -6,6 +6,7 @@
 #include "app/StateChangePolicy.h"
 #include "app/account/EndpointRetryGate.h"
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
@@ -30,6 +31,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 class QNetworkAccessManager;
@@ -163,7 +165,29 @@ namespace javelin::app
             }
         };
 
+        // A refreshed access token is being fetched after the state-change source was rejected.
+        struct AuthenticationRecoveryInFlight
+        {
+        };
+        // The source reconnects with this refreshed token; rejecting it too is reported, not
+        // retried, so a server that refuses every token cannot loop through refreshes.
+        struct AuthenticationRetryingRefreshedToken
+        {
+            std::string accessToken;
+        };
+        using AuthenticationRecovery = std::variant<std::monostate, AuthenticationRecoveryInFlight,
+                                                    AuthenticationRetryingRefreshedToken>;
+
         [[nodiscard]] bool hasValidSettings() const;
+        [[nodiscard]] bool isCurrentRun(const RunContext& runContext) const;
+        [[nodiscard]] static javelin::jmap::api::ApiRequestContext
+        requestContext(const RunConfiguration& configuration);
+        void completeNotificationBaseline(
+            const std::optional<std::vector<std::string>>& requestedMailboxIds);
+        void handleMailDeltaFailure(const QString& operation,
+                                    const javelin::jmap::OperationError& error,
+                                    EndpointRetryGate::Lease& retryLease,
+                                    bool notificationBaselineRequested);
         [[nodiscard]] std::optional<RunConfiguration> resolveConfiguration() const;
         [[nodiscard]] QCoro::Task<void> runLoop(std::shared_ptr<RunContext> runContext);
         [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(MailRefreshDemand demand,
@@ -234,10 +258,9 @@ namespace javelin::app
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;
-        bool m_refreshInFlight = false;
-        bool m_authenticationRecoveryInFlight = false;
-        std::optional<std::string> m_stateChangeAuthenticationRetryToken;
-        std::optional<std::size_t> m_refreshGenerationInFlight;
+        // Set while a refresh loop for that run generation is draining queued demand.
+        std::optional<std::size_t> m_refreshInFlightGeneration;
+        AuthenticationRecovery m_authenticationRecovery;
         MailRefreshDemand m_queuedRefreshDemand;
         MailRefreshDemand m_debouncedRefreshDemand;
         QElapsedTimer m_refreshClock;
