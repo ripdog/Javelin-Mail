@@ -55,6 +55,36 @@ namespace javelin::app
         std::string queryState;
         std::size_t itemCount = 0;
         bool displayCurrent = false;
+
+        // True when this window ends the result list, so no later window can return items.
+        [[nodiscard]] bool reachesEnd() const
+        {
+            if (itemCount == 0)
+                return true;
+            if (total.has_value())
+                return position + itemCount >= *total;
+            return returnedLimit > 0 && itemCount < returnedLimit;
+        }
+    };
+
+    [[nodiscard]] inline std::vector<MessageListWindowRequest>
+    messageListWindowRequests(const std::vector<MessageListWindow>& windows)
+    {
+        std::vector<MessageListWindowRequest> requests;
+        requests.reserve(windows.size());
+        for (const auto& window : windows)
+            requests.push_back({.offset = window.requestedOffset, .limit = window.requestedLimit});
+        return requests;
+    }
+
+    // A refresh of the projected cache windows that runs off the GUI thread. A reload requested
+    // while one is in flight runs once more after it lands, since the in-flight snapshot may
+    // predate the change that asked for it.
+    enum class ProjectedReloadState
+    {
+        Idle,
+        InFlight,
+        InFlightRerunRequested,
     };
 
     class MessageListSession : public QObject

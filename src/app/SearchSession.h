@@ -65,6 +65,36 @@ namespace javelin::app
         [[nodiscard]] std::size_t nextOnlineOffset() const;
         [[nodiscard]] std::string onlineWindowKey() const;
         [[nodiscard]] bool updateThreadMaterializationState();
+        [[nodiscard]] bool loadMorePending(std::size_t offset) const;
+        [[nodiscard]] std::vector<MessageListWindow>::iterator pendingLoadMoreWindow();
+        void finishLoadMore();
+        void appendPendingWindow(std::size_t offset);
+
+        // An online load more first tries the cache (including a prefetch already in flight for
+        // its offset) and only then commits to an anchored continuation request.
+        struct PendingLoadMore
+        {
+            enum class Phase
+            {
+                // A prefetch for this offset is in flight; no window is appended yet.
+                AwaitingPrefetch,
+                // A cached or prefetched page may satisfy it; otherwise request a continuation.
+                ReadingCache,
+                // The continuation request is in flight; a current cached page may be shown.
+                AwaitingContinuation,
+                // The continuation landed, so the next cache read must produce the page or fail.
+                ReadingContinuation,
+            };
+
+            std::size_t offset = 0;
+            std::string anchorEmailId;
+            Phase phase = Phase::ReadingCache;
+
+            [[nodiscard]] bool committed() const
+            {
+                return phase == Phase::AwaitingContinuation || phase == Phase::ReadingContinuation;
+            }
+        };
 
         std::string m_accountId;
         std::string m_query;
@@ -81,16 +111,12 @@ namespace javelin::app
         std::size_t m_localVisibleCount = 0;
         std::vector<MessageListWindow> m_windows;
         std::unordered_set<std::size_t> m_prefetchOffsets;
-        std::optional<std::size_t> m_pendingLoadMoreOffset;
-        std::optional<std::string> m_pendingLoadMoreAnchor;
-        bool m_pendingLoadMoreCommitted = false;
-        bool m_pendingLoadMoreRequestCompleted = false;
+        std::optional<PendingLoadMore> m_pendingLoadMore;
         bool m_localSnapshotLoaded = false;
         bool m_localSearchInFlight = false;
         bool m_refreshAfterCurrent = false;
         bool m_closed = false;
-        bool m_projectedReloadInFlight = false;
-        bool m_projectedReloadPending = false;
+        ProjectedReloadState m_projectedReload = ProjectedReloadState::Idle;
         bool m_refreshAwaitingCache = false;
         bool m_endReached = false;
         std::uint64_t m_generation = 0;

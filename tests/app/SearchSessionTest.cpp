@@ -668,6 +668,73 @@ TEST_CASE("online search infinite scrolling consumes a compatible prefetched bou
     CHECK_FALSE(session.canLoadMore());
 }
 
+TEST_CASE("online search load more completes from a window an earlier prefetch already cached",
+          "[app][search-session][infinite-scroll]")
+{
+    ApplicationGuard application;
+    auto context = makeSessionContext(QStringLiteral("search-session-prefetched-load-more-test"));
+    seedSearchData(context.connection, false);
+    PendingSearchMaterializationPort materialization;
+    FakeMailEvents events;
+    javelin::app::SearchSession session{
+        "account-1",
+        {.from = "sender@example.test"},
+        {},
+        context.queries,
+        materialization,
+        events,
+        2,
+        javelin::app::RestoredSearchState{
+            .mode = javelin::app::SearchMode::Online,
+            .sessionId = "test-session",
+            .windows = {{.offset = 0, .limit = 2}},
+        },
+    };
+
+    session.loadCachedState();
+    waitFor([&] { return session.state().cacheLoaded; });
+    REQUIRE(session.state().items.size() == 2);
+    waitFor([&] { return materialization.lastSearchIntent.has_value(); });
+    REQUIRE(materialization.lastSearchIntent->offset == 2);
+
+    javelin::jmap::cache::SearchWindowRepository windows{context.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = searchWindowKey(),
+                          .offset = 2,
+                          .limit = 2,
+                          .position = 2,
+                          .returnedLimit = 2,
+                          .total = 4,
+                          .queryState = "state-1",
+                          .emailIds = {"email-3", "email-4"},
+                      })
+                      .has_value());
+    materialization.complete(javelin::app::SearchWindowSummary{
+        .accountId = "account-1",
+        .queryKey = searchWindowKey(),
+        .offset = 2,
+        .limit = 2,
+        .position = 2,
+        .returnedLimit = 2,
+        .representativeCount = 2,
+        .total = 4,
+        .queryState = "state-1",
+    });
+    // Let the prefetch land before the user scrolls, so load more is served by the cache alone.
+    waitFor([&] { return session.canLoadMore(); });
+    for (int pass = 0; pass < 5; ++pass)
+        QCoreApplication::processEvents();
+
+    REQUIRE(session.loadMore());
+    waitFor([&] { return session.state().items.size() == 4; });
+    waitFor([&] { return !session.state().loadMoreInFlight; });
+    CHECK(session.state().loadMoreError.isEmpty());
+    CHECK(session.state().items[3].emailId == "email-4");
+    CHECK_FALSE(session.canLoadMore());
+}
+
 TEST_CASE("online search exposes visible Thread materialization progress",
           "[app][search-session][thread-coverage][progress]")
 {

@@ -23,21 +23,6 @@ namespace javelin::app
 {
     namespace
     {
-        [[nodiscard]] std::vector<MessageListWindowRequest>
-        projectedWindowRequests(const std::vector<MessageListWindow>& windows)
-        {
-            std::vector<MessageListWindowRequest> requests;
-            requests.reserve(windows.size());
-            for (const auto& window : windows)
-            {
-                requests.push_back({
-                    .offset = window.requestedOffset,
-                    .limit = window.requestedLimit,
-                });
-            }
-            return requests;
-        }
-
         struct ProjectedMailboxSnapshot
         {
             std::vector<std::optional<javelin::jmap::cache::MailboxWindowPage>> windows;
@@ -351,18 +336,18 @@ namespace javelin::app
 
     void MailboxSession::reloadProjectedWindows()
     {
-        if (m_projectedReloadInFlight)
+        if (m_projectedReload != ProjectedReloadState::Idle)
         {
-            m_projectedReloadPending = true;
+            m_projectedReload = ProjectedReloadState::InFlightRerunRequested;
             return;
         }
         if (m_windows.empty())
             resetToInitialWindow();
 
-        auto requests = projectedWindowRequests(m_windows);
+        auto requests = messageListWindowRequests(m_windows);
         auto requestedWindows = requests;
 
-        m_projectedReloadInFlight = true;
+        m_projectedReload = ProjectedReloadState::InFlight;
         const auto generation = m_generation;
         const auto ticket = m_refreshGeneration.begin(m_cacheEpoch);
         const auto continuityEmailId = m_quickFilterContinuityEmailId;
@@ -375,37 +360,36 @@ namespace javelin::app
             {
                 auto result = watcher->result();
                 watcher->deleteLater();
-                m_projectedReloadInFlight = false;
+                const bool rerunRequested =
+                    std::exchange(m_projectedReload, ProjectedReloadState::Idle) ==
+                    ProjectedReloadState::InFlightRerunRequested;
 
                 if (generation != m_generation ||
                     continuityEmailId != m_quickFilterContinuityEmailId ||
                     continuityThreadId != m_quickFilterContinuityThreadId)
                 {
-                    if (std::exchange(m_projectedReloadPending, false))
+                    if (rerunRequested)
                         reloadProjectedWindows();
                     return;
                 }
-                if (requestedWindows != projectedWindowRequests(m_windows))
+                if (requestedWindows != messageListWindowRequests(m_windows))
                 {
                     // Load more or a window reset changed the window set while this snapshot was
                     // loading, so its pages no longer line up with the current windows.
-                    m_projectedReloadPending = false;
                     reloadProjectedWindows();
                     return;
                 }
                 if (!m_refreshGeneration.install(ticket, m_cacheEpoch))
                 {
-                    m_projectedReloadPending = false;
                     reloadProjectedWindows();
                     return;
                 }
 
                 if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 {
-                    if (m_state.loadMoreInFlight)
+                    if (m_pendingLoadMore.has_value())
                     {
-                        m_state.loadMoreInFlight = false;
-                        m_pendingLoadMoreOffset.reset();
+                        finishLoadMore();
                         m_state.loadMoreError = error->message;
                     }
                     else
@@ -418,7 +402,7 @@ namespace javelin::app
                         m_state.refreshInFlight = false;
                     }
                     Q_EMIT stateChanged();
-                    if (std::exchange(m_projectedReloadPending, false))
+                    if (rerunRequested)
                         reloadProjectedWindows();
                     return;
                 }
@@ -453,18 +437,17 @@ namespace javelin::app
                     m_state.stale = !queryStateConsistent;
                     m_state.refreshError.clear();
                     m_state.loadMoreError.clear();
-                    if (m_state.loadMoreInFlight && m_pendingLoadMoreRequestCompleted)
+                    if (m_pendingLoadMore.has_value() &&
+                        m_pendingLoadMore->phase == PendingLoadMore::Phase::ReadingPage)
                     {
-                        m_state.loadMoreInFlight = false;
-                        m_pendingLoadMoreOffset.reset();
-                        m_pendingLoadMoreRequestCompleted = false;
+                        finishLoadMore();
                     }
                 }
-                else if (m_pendingLoadMoreOffset.has_value())
+                else if (m_pendingLoadMore.has_value())
                 {
-                    const auto pending = std::ranges::find_if(
-                        m_windows, [this](const MessageListWindow& window)
-                        { return window.requestedOffset == *m_pendingLoadMoreOffset; });
+                    const bool pageExpected =
+                        m_pendingLoadMore->phase == PendingLoadMore::Phase::ReadingPage;
+                    const auto pending = pendingLoadMoreWindow();
                     const auto pendingIndex =
                         pending == m_windows.end()
                             ? windows.size()
@@ -494,29 +477,16 @@ namespace javelin::app
                         }
                         m_state.itemsRevision = ++m_itemsRevision;
                         m_state.total = page.total;
-                        m_endReached =
-                            metadata.itemCount == 0 ||
-                            (metadata.total.has_value() &&
-                             metadata.position + metadata.itemCount >= *metadata.total) ||
-                            (!metadata.total.has_value() && metadata.returnedLimit > 0 &&
-                             metadata.itemCount < metadata.returnedLimit);
+                        m_endReached = metadata.reachesEnd();
                         m_state.loadMoreError.clear();
-                        if (m_pendingLoadMoreRequestCompleted)
-                        {
-                            m_pendingLoadMoreOffset.reset();
-                            m_state.loadMoreInFlight = false;
-                            m_pendingLoadMoreRequestCompleted = false;
-                        }
+                        if (pageExpected)
+                            finishLoadMore();
                     }
-                    else if (m_pendingLoadMoreRequestCompleted)
+                    else if (pageExpected)
                     {
-                        if (pending != m_windows.end())
-                            m_windows.erase(pending);
+                        abandonLoadMore();
                         m_state.loadMoreError =
                             i18n("Could not load more messages from the cache.");
-                        m_pendingLoadMoreOffset.reset();
-                        m_state.loadMoreInFlight = false;
-                        m_pendingLoadMoreRequestCompleted = false;
                     }
                     m_state.stale = true;
                 }
@@ -598,7 +568,7 @@ namespace javelin::app
                 Q_EMIT stateChanged();
                 if (materializeMissingInitial)
                     refresh(MessageListRefreshMode::Materialize);
-                if (std::exchange(m_projectedReloadPending, false))
+                if (rerunRequested)
                     reloadProjectedWindows();
             });
         watcher->setFuture(QtConcurrent::run(loadProjectedMailboxWindows, m_databasePath,
@@ -688,11 +658,7 @@ namespace javelin::app
         {
             const auto& last = m_windows.back();
             m_state.total = last.total;
-            m_endReached =
-                last.itemCount == 0 ||
-                (last.total.has_value() && last.position + last.itemCount >= *last.total) ||
-                (!last.total.has_value() && last.returnedLimit > 0 &&
-                 last.itemCount < last.returnedLimit);
+            m_endReached = last.reachesEnd();
         }
         else
         {
@@ -723,20 +689,10 @@ namespace javelin::app
     {
         if (m_state.refreshInFlight)
             return;
-        if (m_state.loadMoreInFlight)
+        if (m_pendingLoadMore.has_value())
         {
             ++m_refreshRequestId;
-            if (m_pendingLoadMoreOffset.has_value())
-            {
-                const auto pending = std::ranges::find_if(
-                    m_windows, [this](const MessageListWindow& window)
-                    { return window.requestedOffset == *m_pendingLoadMoreOffset; });
-                if (pending != m_windows.end())
-                    m_windows.erase(pending);
-            }
-            m_pendingLoadMoreOffset.reset();
-            m_state.loadMoreInFlight = false;
-            m_pendingLoadMoreRequestCompleted = false;
+            abandonLoadMore();
         }
 
         m_state.refreshInFlight = true;
@@ -772,14 +728,8 @@ namespace javelin::app
                 .itemCount = summary.representativeCount,
                 .displayCurrent = false,
             });
-            m_pendingLoadMoreOffset.reset();
-            m_state.loadMoreInFlight = false;
-            m_pendingLoadMoreRequestCompleted = false;
-            m_endReached = summary.representativeCount == 0 ||
-                           (summary.total.has_value() &&
-                            summary.position + summary.representativeCount >= *summary.total) ||
-                           (!summary.total.has_value() && summary.returnedLimit > 0 &&
-                            summary.representativeCount < summary.returnedLimit);
+            finishLoadMore();
+            m_endReached = m_windows.back().reachesEnd();
             m_refreshAwaitingCache = true;
             reloadProjectedWindows();
         };
@@ -914,7 +864,7 @@ namespace javelin::app
             }
         }
 
-        if (hadAppliedContinuity || m_projectedReloadInFlight)
+        if (hadAppliedContinuity || m_projectedReload != ProjectedReloadState::Idle)
             reloadProjectedWindows();
     }
 
@@ -960,8 +910,7 @@ namespace javelin::app
                 : m_state.items.back().emailId;
         const auto generation = m_generation;
         const auto requestId = ++m_refreshRequestId;
-        m_pendingLoadMoreOffset = offset;
-        m_pendingLoadMoreRequestCompleted = false;
+        m_pendingLoadMore = PendingLoadMore{.offset = offset};
         m_state.loadMoreInFlight = true;
         m_state.loadMoreError.clear();
         m_windows.push_back({
@@ -980,31 +929,22 @@ namespace javelin::app
             [this, generation, requestId, offset](const javelin::jmap::OperationError& error)
         {
             if (generation != m_generation || requestId != m_refreshRequestId ||
-                !m_pendingLoadMoreOffset.has_value() || *m_pendingLoadMoreOffset != offset)
+                !loadMorePending(offset))
             {
                 return;
             }
-            const auto pending =
-                std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
-                                     { return window.requestedOffset == offset; });
-            if (pending != m_windows.end())
-                m_windows.erase(pending);
-            m_pendingLoadMoreOffset.reset();
-            m_pendingLoadMoreRequestCompleted = false;
-            m_state.loadMoreInFlight = false;
+            abandonLoadMore();
             m_state.loadMoreError = error.message;
             Q_EMIT stateChanged();
         };
         const auto handleSummary = [this, generation, requestId, offset](const auto& summary)
         {
             if (generation != m_generation || requestId != m_refreshRequestId ||
-                !m_pendingLoadMoreOffset.has_value() || *m_pendingLoadMoreOffset != offset)
+                !loadMorePending(offset))
             {
                 return;
             }
-            const auto pending =
-                std::ranges::find_if(m_windows, [offset](const MessageListWindow& window)
-                                     { return window.requestedOffset == offset; });
+            const auto pending = pendingLoadMoreWindow();
             if (pending == m_windows.end())
                 return;
             pending->requestedOffset = summary.offset;
@@ -1015,12 +955,8 @@ namespace javelin::app
             pending->queryState = summary.queryState;
             pending->itemCount = summary.representativeCount;
             pending->displayCurrent = false;
-            m_pendingLoadMoreRequestCompleted = true;
-            m_endReached = summary.representativeCount == 0 ||
-                           (summary.total.has_value() &&
-                            summary.position + summary.representativeCount >= *summary.total) ||
-                           (!summary.total.has_value() && summary.returnedLimit > 0 &&
-                            summary.representativeCount < summary.returnedLimit);
+            m_pendingLoadMore->phase = PendingLoadMore::Phase::ReadingPage;
+            m_endReached = pending->reachesEnd();
             reloadProjectedWindows();
         };
 
@@ -1108,12 +1044,37 @@ namespace javelin::app
             .itemCount = 0,
             .displayCurrent = false,
         });
-        m_pendingLoadMoreOffset.reset();
-        m_pendingLoadMoreRequestCompleted = false;
+        m_pendingLoadMore.reset();
         m_quickFilterAuthoritativeAnchorEmailId.reset();
         m_state = MessageListState{};
         m_state.itemsRevision = ++m_itemsRevision;
         m_endReached = false;
+    }
+
+    bool MailboxSession::loadMorePending(const std::size_t offset) const
+    {
+        return m_pendingLoadMore.has_value() && m_pendingLoadMore->offset == offset;
+    }
+
+    std::vector<MessageListWindow>::iterator MailboxSession::pendingLoadMoreWindow()
+    {
+        if (!m_pendingLoadMore.has_value())
+            return m_windows.end();
+        return std::ranges::find(m_windows, m_pendingLoadMore->offset,
+                                 &MessageListWindow::requestedOffset);
+    }
+
+    void MailboxSession::finishLoadMore()
+    {
+        m_pendingLoadMore.reset();
+        m_state.loadMoreInFlight = false;
+    }
+
+    void MailboxSession::abandonLoadMore()
+    {
+        if (const auto pending = pendingLoadMoreWindow(); pending != m_windows.end())
+            m_windows.erase(pending);
+        finishLoadMore();
     }
 
     std::size_t MailboxSession::nextOffset() const

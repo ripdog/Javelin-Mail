@@ -64,6 +64,25 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::search::EmailSearchCriteria filteredCriteria() const;
         [[nodiscard]] std::size_t nextOffset() const;
         [[nodiscard]] bool updateThreadMaterializationState();
+        [[nodiscard]] bool loadMorePending(std::size_t offset) const;
+        [[nodiscard]] std::vector<MessageListWindow>::iterator pendingLoadMoreWindow();
+        void finishLoadMore();
+        void abandonLoadMore();
+
+        // A load more owns the trailing window it appended until that window's page is applied.
+        struct PendingLoadMore
+        {
+            enum class Phase
+            {
+                // The query request is in flight; a current cached page may already be shown.
+                AwaitingSummary,
+                // The request landed, so the next cache read must produce the page or fail.
+                ReadingPage,
+            };
+
+            std::size_t offset = 0;
+            Phase phase = Phase::AwaitingSummary;
+        };
 
         std::string m_accountId;
         std::string m_mailboxId;
@@ -84,15 +103,13 @@ namespace javelin::app
         MessageListState m_state;
         std::vector<MessageListWindow> m_windows;
         MailboxObservationLease m_observation;
-        std::optional<std::size_t> m_pendingLoadMoreOffset;
-        bool m_pendingLoadMoreRequestCompleted = false;
+        std::optional<PendingLoadMore> m_pendingLoadMore;
         std::uint64_t m_generation = 0;
         std::uint64_t m_refreshRequestId = 0;
         std::uint64_t m_itemsRevision = 0;
         std::uint64_t m_cacheEpoch = 0;
         RefreshGeneration m_refreshGeneration;
-        bool m_projectedReloadInFlight = false;
-        bool m_projectedReloadPending = false;
+        ProjectedReloadState m_projectedReload = ProjectedReloadState::Idle;
         bool m_refreshAwaitingCache = false;
         bool m_endReached = false;
         std::unordered_set<std::string> m_materializingThreadIds;
