@@ -62,7 +62,8 @@ namespace javelin::gui::messageview
                 [this](const QString& sourceLanguage, const QString& targetLanguage,
                        const qint64 received, const qint64 total)
                 {
-                    if (!m_inProgress)
+                    auto* translating = std::get_if<TranslationInProgress>(&m_translation);
+                    if (translating == nullptr)
                         return;
                     const auto direction = QStringLiteral("%1 → %2").arg(
                         languageName(sourceLanguage), languageName(targetLanguage));
@@ -71,12 +72,13 @@ namespace javelin::gui::messageview
                         const auto percentage = static_cast<int>(std::clamp(
                             100.0 * static_cast<double>(received) / static_cast<double>(total), 0.0,
                             100.0));
-                        m_progressText =
+                        translating->progressText =
                             i18n("Downloading %1 translation model… %2%", direction, percentage);
                     }
                     else
                     {
-                        m_progressText = i18n("Downloading %1 translation model…", direction);
+                        translating->progressText =
+                            i18n("Downloading %1 translation model…", direction);
                     }
                     Q_EMIT stateChanged();
                 });
@@ -85,14 +87,9 @@ namespace javelin::gui::messageview
     void MessageTranslationController::reset()
     {
         ++m_requestToken;
-        m_inProgress = false;
-        m_messageTranslated = false;
-        m_originalPlainText.clear();
+        m_translation = TranslationIdle{};
         m_error.clear();
-        m_progressText.clear();
-        m_translatedText.clear();
         m_autoTranslateAttempted = false;
-        m_translationWasAutomatic = false;
         m_languageDetectionStarted = false;
         ++m_languageDetectionToken;
         m_languageDetection.reset();
@@ -103,15 +100,17 @@ namespace javelin::gui::messageview
     void MessageTranslationController::settingsChanged()
     {
         ++m_requestToken;
-        m_inProgress = false;
         m_error.clear();
-        m_progressText.clear();
         m_autoTranslateAttempted = false;
-        m_translationWasAutomatic = false;
-        if (m_messageTranslated)
+        if (std::holds_alternative<MessageTranslated>(m_translation))
+        {
             restoreCurrentTranslation();
+        }
         else
+        {
+            m_translation = TranslationIdle{};
             Q_EMIT stateChanged();
+        }
 
         if (!m_service.isEnabled() || !m_snapshot.has_value())
             return;
@@ -174,8 +173,9 @@ namespace javelin::gui::messageview
 
     void MessageTranslationController::maybeAutoTranslate()
     {
-        if (!m_service.isEnabled() || m_autoTranslateAttempted || m_messageTranslated ||
-            m_inProgress || !m_snapshot.has_value() || !m_shouldOfferTranslation)
+        if (!m_service.isEnabled() || m_autoTranslateAttempted ||
+            !std::holds_alternative<TranslationIdle>(m_translation) || !m_snapshot.has_value() ||
+            !m_shouldOfferTranslation)
             return;
         if (m_bodyPresenter.activeView() == MessageBodyPresenter::View::Html &&
             !m_bodyPresenter.htmlDocumentLoaded())
@@ -191,7 +191,7 @@ namespace javelin::gui::messageview
 
     void MessageTranslationController::translateCurrentMessage()
     {
-        if (m_messageTranslated)
+        if (std::holds_alternative<MessageTranslated>(m_translation))
         {
             restoreCurrentTranslation();
             return;
@@ -200,8 +200,9 @@ namespace javelin::gui::messageview
                                 javelin::gui::translation::ExternalFetchPolicy::AllowExternalFetch);
     }
 
-    bool MessageTranslationController::applyTranslatedChunks(
-        const javelin::gui::translation::TranslationChunks& chunks)
+    std::optional<MessageTranslationController::MessageTranslated>
+    MessageTranslationController::applyTranslatedChunks(
+        const javelin::gui::translation::TranslationChunks& chunks, const bool automatic)
     {
         QStringList accessibleChunks;
         for (const auto& group : chunks)
@@ -216,36 +217,37 @@ namespace javelin::gui::messageview
         if (m_bodyPresenter.activeView() == MessageBodyPresenter::View::PlainText)
         {
             if (chunks.empty() || chunks.front().empty())
-                return false;
-            m_originalPlainText = m_plainText.toPlainText();
+                return std::nullopt;
+            auto originalPlainText = m_plainText.toPlainText();
             m_plainText.setHtml(linkifyPlainText(chunks.front().front()));
-            m_translatedText = accessibleChunks.join(QLatin1Char{'\n'});
-            return true;
+            return MessageTranslated{.automatic = automatic,
+                                     .originalPlainText = std::move(originalPlainText),
+                                     .translatedText = accessibleChunks.join(QLatin1Char{'\n'})};
         }
         if (m_bodyPresenter.activeView() == MessageBodyPresenter::View::Html)
         {
             m_html.applyTranslationChunks(chunks);
-            m_translatedText = accessibleChunks.join(QLatin1Char{'\n'});
-            return true;
+            return MessageTranslated{.automatic = automatic,
+                                     .originalPlainText = {},
+                                     .translatedText = accessibleChunks.join(QLatin1Char{'\n'})};
         }
-        return false;
+        return std::nullopt;
     }
 
     void MessageTranslationController::translateCurrentMessage(
         const bool automatic, const javelin::gui::translation::ExternalFetchPolicy fetchPolicy)
     {
-        if (!m_service.isEnabled() || !m_snapshot.has_value() || m_inProgress)
+        if (!m_service.isEnabled() || !m_snapshot.has_value() ||
+            !std::holds_alternative<TranslationIdle>(m_translation))
             return;
 
         const auto selectedEmailId = m_emailId;
         const auto requestToken = ++m_requestToken;
-        m_inProgress = true;
+        m_translation = TranslationInProgress{.automatic = automatic, .progressText = {}};
         m_error.clear();
-        m_progressText.clear();
-        m_translationWasAutomatic = automatic;
         Q_EMIT stateChanged();
 
-        const auto translateChunks = [this, selectedEmailId, requestToken, fetchPolicy](
+        const auto translateChunks = [this, selectedEmailId, requestToken, fetchPolicy, automatic](
                                          javelin::gui::translation::TranslationChunks chunks)
         {
             const auto sourceLanguage =
@@ -255,16 +257,15 @@ namespace javelin::gui::messageview
             auto task = m_service.translate(std::move(chunks), sourceLanguage, fetchPolicy);
             QCoro::connect(
                 std::move(task), this,
-                [this, selectedEmailId,
-                 requestToken](javelin::gui::translation::TranslationResult result)
+                [this, selectedEmailId, requestToken,
+                 automatic](javelin::gui::translation::TranslationResult result)
                 {
                     if (m_emailId != selectedEmailId || requestToken != m_requestToken)
                         return;
-                    m_inProgress = false;
+                    m_translation = TranslationIdle{};
                     if (std::holds_alternative<javelin::gui::translation::TranslationUnavailable>(
                             result))
                     {
-                        m_translationWasAutomatic = false;
                         Q_EMIT stateChanged();
                         return;
                     }
@@ -278,13 +279,14 @@ namespace javelin::gui::messageview
 
                     const auto& translatedChunks =
                         std::get<javelin::gui::translation::TranslationChunks>(result);
-                    if (!applyTranslatedChunks(translatedChunks))
+                    auto translated = applyTranslatedChunks(translatedChunks, automatic);
+                    if (!translated.has_value())
                     {
                         m_error = i18n("Translation failed: no translated text was returned.");
                         Q_EMIT stateChanged();
                         return;
                     }
-                    m_messageTranslated = true;
+                    m_translation = std::move(*translated);
                     Q_EMIT stateChanged();
                 });
         };
@@ -306,7 +308,7 @@ namespace javelin::gui::messageview
                         return;
                     if (chunks.empty())
                     {
-                        m_inProgress = false;
+                        m_translation = TranslationIdle{};
                         m_error = i18n("Translation failed: no message text was found.");
                         Q_EMIT stateChanged();
                         return;
@@ -318,22 +320,19 @@ namespace javelin::gui::messageview
 
     void MessageTranslationController::restoreCurrentTranslation()
     {
+        const auto* translated = std::get_if<MessageTranslated>(&m_translation);
         if (m_bodyPresenter.activeView() == MessageBodyPresenter::View::PlainText &&
-            !m_originalPlainText.isEmpty())
+            translated != nullptr && !translated->originalPlainText.isEmpty())
         {
-            m_plainText.setHtml(linkifyPlainText(m_originalPlainText));
+            m_plainText.setHtml(linkifyPlainText(translated->originalPlainText));
         }
         else if (m_bodyPresenter.activeView() == MessageBodyPresenter::View::Html)
         {
             m_html.restoreOriginalText();
         }
 
-        m_inProgress = false;
-        m_messageTranslated = false;
-        m_originalPlainText.clear();
+        m_translation = TranslationIdle{};
         m_error.clear();
-        m_progressText.clear();
-        m_translatedText.clear();
         Q_EMIT stateChanged();
     }
 
@@ -383,17 +382,18 @@ namespace javelin::gui::messageview
 
     bool MessageTranslationController::inProgress() const
     {
-        return m_inProgress;
+        return std::holds_alternative<TranslationInProgress>(m_translation);
     }
 
     bool MessageTranslationController::messageTranslated() const
     {
-        return m_messageTranslated;
+        return std::holds_alternative<MessageTranslated>(m_translation);
     }
 
     bool MessageTranslationController::translationWasAutomatic() const
     {
-        return m_translationWasAutomatic;
+        const auto* translated = std::get_if<MessageTranslated>(&m_translation);
+        return translated != nullptr && translated->automatic;
     }
 
     const QString& MessageTranslationController::error() const
@@ -403,12 +403,16 @@ namespace javelin::gui::messageview
 
     const QString& MessageTranslationController::progressText() const
     {
-        return m_progressText;
+        static const QString none;
+        const auto* translating = std::get_if<TranslationInProgress>(&m_translation);
+        return translating == nullptr ? none : translating->progressText;
     }
 
     const QString& MessageTranslationController::translatedText() const
     {
-        return m_translatedText;
+        static const QString none;
+        const auto* translated = std::get_if<MessageTranslated>(&m_translation);
+        return translated == nullptr ? none : translated->translatedText;
     }
 
     const std::optional<javelin::gui::translation::LanguageDetectionResult>&

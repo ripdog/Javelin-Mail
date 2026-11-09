@@ -11,6 +11,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <variant>
 
 class QTextBrowser;
 
@@ -62,10 +63,30 @@ namespace javelin::gui::messageview
         void stateChanged();
 
       private:
+        struct TranslationIdle
+        {
+        };
+        struct TranslationInProgress
+        {
+            bool automatic = false;
+            QString progressText;
+        };
+        struct MessageTranslated
+        {
+            bool automatic = false;
+            // The plain-text body as shown before translation; HTML restores from the view.
+            QString originalPlainText;
+            // The translated text exposed to accessibility and copy actions.
+            QString translatedText;
+        };
+        using TranslationState =
+            std::variant<TranslationIdle, TranslationInProgress, MessageTranslated>;
+
         void translateCurrentMessage(bool automatic,
                                      javelin::gui::translation::ExternalFetchPolicy fetchPolicy);
-        [[nodiscard]] bool
-        applyTranslatedChunks(const javelin::gui::translation::TranslationChunks& chunks);
+        [[nodiscard]] std::optional<MessageTranslated>
+        applyTranslatedChunks(const javelin::gui::translation::TranslationChunks& chunks,
+                              bool automatic);
         void updateOfferState();
 
         javelin::gui::translation::TranslationService& m_service;
@@ -77,15 +98,10 @@ namespace javelin::gui::messageview
         std::function<QString()> m_senderAddress;
         std::function<QString()> m_senderDomain;
 
-        bool m_inProgress = false;
+        TranslationState m_translation;
         std::uint64_t m_requestToken = 0;
-        bool m_messageTranslated = false;
-        QString m_originalPlainText;
         QString m_error;
-        QString m_progressText;
-        QString m_translatedText;
         bool m_autoTranslateAttempted = false;
-        bool m_translationWasAutomatic = false;
         bool m_languageDetectionStarted = false;
         std::uint64_t m_languageDetectionToken = 0;
         std::optional<javelin::gui::translation::LanguageDetectionResult> m_languageDetection;
