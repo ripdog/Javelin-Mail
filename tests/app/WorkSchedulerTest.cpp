@@ -83,6 +83,76 @@ TEST_CASE("work scheduler recovers running work and preserves explicit pauses",
     CHECK(pausedRecovery.mayStartBackgroundNetwork());
 }
 
+TEST_CASE("work scheduler progress updates do not overwrite a requested pause",
+          "[app][work-scheduler]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-pause-race-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+    REQUIRE_FALSE(scheduler
+                      .ensure({.jobId = "job-1",
+                               .parentJobId = std::nullopt,
+                               .accountId = std::nullopt,
+                               .kind = javelin::app::WorkKind::FullMailSync,
+                               .priority = javelin::app::WorkPriority::Bulk,
+                               .title = QStringLiteral("Download mail")})
+                      .has_value());
+    // Callers that have no progress to report pass a default WorkProgress with a null detail.
+    REQUIRE_FALSE(scheduler.update("job-1", javelin::app::WorkStatus::Running, {}).has_value());
+    REQUIRE_FALSE(scheduler.pause("job-1").has_value());
+
+    const auto record = [&scheduler]()
+    {
+        auto found = scheduler.find("job-1");
+        REQUIRE(std::holds_alternative<std::optional<javelin::app::WorkRecord>>(found));
+        auto value = std::get<std::optional<javelin::app::WorkRecord>>(std::move(found));
+        REQUIRE(value.has_value());
+        return *value;
+    };
+
+    REQUIRE_FALSE(scheduler
+                      .update("job-1", javelin::app::WorkStatus::Running,
+                              {.completedUnits = 40,
+                               .totalUnits = std::nullopt,
+                               .completedBytes = 0,
+                               .totalBytes = std::nullopt,
+                               .detail = QStringLiteral("Downloading")},
+                              QStringLiteral("{\"position\":40}"))
+                      .has_value());
+    auto paused = record();
+    CHECK(paused.status == javelin::app::WorkStatus::Paused);
+    CHECK(paused.pauseRequested);
+    CHECK(paused.progress.completedUnits == 40);
+    CHECK(paused.checkpointJson == QStringLiteral("{\"position\":40}"));
+
+    REQUIRE_FALSE(
+        scheduler.update("job-1", javelin::app::WorkStatus::WaitingForNetwork, {}).has_value());
+    CHECK(record().status == javelin::app::WorkStatus::Paused);
+
+    REQUIRE_FALSE(scheduler.resume("job-1").has_value());
+    REQUIRE_FALSE(scheduler.update("job-1", javelin::app::WorkStatus::Running, {}).has_value());
+    CHECK(record().status == javelin::app::WorkStatus::Running);
+
+    REQUIRE_FALSE(scheduler.pause("job-1").has_value());
+    REQUIRE_FALSE(scheduler.update("job-1", javelin::app::WorkStatus::Complete, {}).has_value());
+    CHECK(record().status == javelin::app::WorkStatus::Complete);
+}
+
 TEST_CASE("work scheduler preserves tag deletion jobs across restart",
           "[app][work-scheduler][tags]")
 {

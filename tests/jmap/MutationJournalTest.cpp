@@ -163,6 +163,68 @@ TEST_CASE("mutation journal round-trips typed Email patch mutations", "[jmap][sy
     CHECK(records.front().baseKeywords == std::vector<std::string>{"$flagged"});
 }
 
+TEST_CASE("mutation journal refuses transitions out of terminal or already dispatched states",
+          "[jmap][sync]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    javelin::jmap::sync::EmailMutationJournal repository{databaseContext.connection};
+    REQUIRE_FALSE(repository
+                      .put({
+                          .mutationId = "action-1",
+                          .operationGroupId = std::nullopt,
+                          .accountId = "account-1",
+                          .status = javelin::jmap::sync::MutationStatus::Pending,
+                          .patch = {.emailId = "eml-1",
+                                    .addMailboxIds = {},
+                                    .removeMailboxIds = {},
+                                    .addKeywords = {"$seen"},
+                                    .removeKeywords = {},
+                                    .destroy = false},
+                          .baseMailboxIds = std::nullopt,
+                          .baseKeywords = std::nullopt,
+                          .baseState = std::nullopt,
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+    const auto status = [&repository]()
+    {
+        const auto result = repository.listForEmail("account-1", "eml-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(result));
+        const auto& records =
+            std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(result);
+        REQUIRE(records.size() == 1);
+        return records.front().status;
+    };
+
+    REQUIRE_FALSE(repository.transition("action-1", javelin::jmap::sync::MutationStatus::InFlight)
+                      .has_value());
+    const auto secondDispatch =
+        repository.transition("action-1", javelin::jmap::sync::MutationStatus::InFlight);
+    REQUIRE(secondDispatch.has_value());
+    CHECK(secondDispatch->message.contains(QStringLiteral("in_flight cannot become in_flight")));
+
+    REQUIRE_FALSE(
+        repository.transition("action-1", javelin::jmap::sync::MutationStatus::Accepted, "state-2")
+            .has_value());
+    const auto lateAmbiguity =
+        repository.transition("action-1", javelin::jmap::sync::MutationStatus::Unknown);
+    REQUIRE(lateAmbiguity.has_value());
+    CHECK(lateAmbiguity->message.contains(QStringLiteral("accepted cannot become unknown")));
+    CHECK(status() == javelin::jmap::sync::MutationStatus::Accepted);
+
+    const auto missing =
+        repository.transition("action-missing", javelin::jmap::sync::MutationStatus::Accepted);
+    REQUIRE(missing.has_value());
+    CHECK(missing->message.contains(QStringLiteral("does not exist")));
+}
+
 TEST_CASE("mailbox subscription mutations project and reject atomically",
           "[jmap][sync][mailbox][consistency]")
 {

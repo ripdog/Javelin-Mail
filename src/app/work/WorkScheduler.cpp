@@ -196,14 +196,23 @@ namespace javelin::app
     {
         const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
+        // A pause requested while the worker was between checks must survive the worker's next
+        // progress write; only an outcome (complete or failed) or an explicit pause replaces it.
         query.prepare(QStringLiteral(
-            "UPDATE background_jobs SET status=:status,detail=:detail,completed_units=:units,"
+            "UPDATE background_jobs SET status=CASE WHEN pause_requested=1 AND :requested_status "
+            "IN "
+            "('queued','running','waiting_for_space','waiting_for_network','waiting_for_auth') "
+            "THEN 'paused' ELSE :status END,detail=:detail,completed_units=:units,"
             "total_units=:total_units,completed_bytes=:bytes,total_bytes=:total_bytes,"
             "checkpoint_json=:checkpoint,error_text=:error,updated_at=CURRENT_TIMESTAMP WHERE "
             "job_id=:id"));
         query.bindValue(QStringLiteral(":status"),
                         QString::fromStdString(std::string{toString(status)}));
-        query.bindValue(QStringLiteral(":detail"), progress.detail);
+        query.bindValue(QStringLiteral(":requested_status"),
+                        QString::fromStdString(std::string{toString(status)}));
+        // The column is NOT NULL; a default WorkProgress carries a null detail.
+        query.bindValue(QStringLiteral(":detail"),
+                        progress.detail.isNull() ? QStringLiteral("") : progress.detail);
         query.bindValue(QStringLiteral(":units"), static_cast<qulonglong>(progress.completedUnits));
         query.bindValue(QStringLiteral(":total_units"),
                         progress.totalUnits

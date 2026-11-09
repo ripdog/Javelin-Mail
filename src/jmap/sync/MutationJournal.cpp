@@ -18,6 +18,24 @@ namespace javelin::jmap::sync
             };
         }
 
+        // Statuses a record may hold immediately before moving to `target`. Terminal rows never
+        // move again; `in_flight` is entered only from `pending` so a dispatch cannot start twice.
+        [[nodiscard]] QString allowedPredecessorStatuses(const MutationStatus target)
+        {
+            switch (target)
+            {
+            case MutationStatus::Pending:
+                return QStringLiteral("'pending','in_flight','unknown'");
+            case MutationStatus::InFlight:
+                return QStringLiteral("'pending'");
+            case MutationStatus::Accepted:
+            case MutationStatus::Rejected:
+            case MutationStatus::Unknown:
+                return QStringLiteral("'pending','in_flight','unknown'");
+            }
+            return {};
+        }
+
         [[nodiscard]] std::optional<std::string> optionalString(const QVariant& value)
         {
             return value.isNull() ? std::nullopt
@@ -402,9 +420,13 @@ namespace javelin::jmap::sync
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "UPDATE mutation_journal SET status=:status,accepted_state=:accepted_state,"
-            "error_json=:error_json,updated_at=CURRENT_TIMESTAMP WHERE mutation_id=:mutation_id"));
+        query.prepare(
+            QStringLiteral(
+                "UPDATE mutation_journal SET status=:status,accepted_state=:accepted_state,"
+                "error_json=:error_json,updated_at=CURRENT_TIMESTAMP WHERE "
+                "mutation_id=:mutation_id "
+                "AND status IN (%1)")
+                .arg(allowedPredecessorStatuses(status)));
         query.bindValue(QStringLiteral(":status"),
                         QString::fromStdString(std::string{toString(status)}));
         query.bindValue(QStringLiteral(":accepted_state"),
@@ -421,7 +443,17 @@ namespace javelin::jmap::sync
         {
             return queryError(QStringLiteral("Transition mutation journal record"), query);
         }
-        if (query.numRowsAffected() != 1)
+        if (query.numRowsAffected() == 1)
+            return std::nullopt;
+
+        QSqlQuery current{m_connection.database()};
+        current.prepare(
+            QStringLiteral("SELECT status FROM mutation_journal WHERE mutation_id=:mutation_id"));
+        current.bindValue(QStringLiteral(":mutation_id"),
+                          QString::fromStdString(std::string{mutationId}));
+        if (!current.exec())
+            return queryError(QStringLiteral("Read mutation journal record status"), current);
+        if (!current.next())
         {
             return javelin::jmap::cache::DatabaseError{
                 .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
@@ -429,7 +461,13 @@ namespace javelin::jmap::sync
                     QStringLiteral("Transition mutation journal record: record does not exist"),
             };
         }
-        return std::nullopt;
+        return javelin::jmap::cache::DatabaseError{
+            .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+            .message = QStringLiteral("Transition mutation journal record %1: %2 cannot become %3")
+                           .arg(QString::fromStdString(std::string{mutationId}),
+                                current.value(0).toString(),
+                                QString::fromStdString(std::string{toString(status)})),
+        };
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
