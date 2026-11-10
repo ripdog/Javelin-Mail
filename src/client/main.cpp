@@ -656,15 +656,28 @@ int main(int argc, char* argv[])
             openPendingMailtos();
     };
 
+    // Activations that open or reuse tabs wait until the restored workspace exists.
+    const auto afterWorkspaceRestore = [&](std::function<void()> action)
+    {
+        if (mainWindow != nullptr)
+            mainWindow->whenWorkspaceRestored(std::move(action));
+    };
+
     openPendingMailtos = [&]
     {
         if (!session.isReady() || mainWindow == nullptr)
             return;
-        for (const auto& mailto : std::exchange(pendingMailtos, {}))
-        {
-            ActivationTokenScope tokenScope{mailto.activationToken};
-            mainWindow->openMailtoUri(mailto.uri);
-        }
+        afterWorkspaceRestore(
+            [&]
+            {
+                if (mainWindow == nullptr)
+                    return;
+                for (const auto& mailto : std::exchange(pendingMailtos, {}))
+                {
+                    ActivationTokenScope tokenScope{mailto.activationToken};
+                    mainWindow->openMailtoUri(mailto.uri);
+                }
+            });
     };
 
     showTaskCenter = [&]
@@ -692,18 +705,21 @@ int main(int argc, char* argv[])
                 if constexpr (std::is_same_v<Route, javelin::protocol::OpenMessageRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);
-                    const auto thread =
-                        activationRoute.threadId.isEmpty()
-                            ? std::optional<std::string>{}
-                            : std::optional<std::string>{activationRoute.threadId.toStdString()};
-                    const auto mailboxName =
-                        activationRoute.mailboxName.isEmpty()
-                            ? std::optional<std::string>{}
-                            : std::optional<std::string>{activationRoute.mailboxName.toStdString()};
-                    static_cast<void>(services->messageNavigationPort().openEmail(
-                        activationRoute.accountId.toStdString(),
-                        activationRoute.mailboxId.toStdString(), thread,
-                        activationRoute.emailId.toStdString(), mailboxName));
+                    afterWorkspaceRestore(
+                        [&, route = activationRoute]
+                        {
+                            const auto thread =
+                                route.threadId.isEmpty()
+                                    ? std::optional<std::string>{}
+                                    : std::optional<std::string>{route.threadId.toStdString()};
+                            const auto mailboxName =
+                                route.mailboxName.isEmpty()
+                                    ? std::optional<std::string>{}
+                                    : std::optional<std::string>{route.mailboxName.toStdString()};
+                            static_cast<void>(services->messageNavigationPort().openEmail(
+                                route.accountId.toStdString(), route.mailboxId.toStdString(),
+                                thread, route.emailId.toStdString(), mailboxName));
+                        });
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenSettingsRoute>)
                 {
@@ -713,50 +729,58 @@ int main(int argc, char* argv[])
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenCalendarEventRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);
-                    const auto navigationDate =
-                        QDate::fromString(activationRoute.navigationDate, Qt::ISODate);
-                    mainWindow->openCalendarEvent(
-                        activationRoute.calendarAccountId, activationRoute.eventId,
-                        activationRoute.recurrenceId.value_or(QString{}),
-                        navigationDate.isValid() ? navigationDate : QDate::currentDate());
+                    afterWorkspaceRestore(
+                        [&, route = activationRoute]
+                        {
+                            const auto navigationDate =
+                                QDate::fromString(route.navigationDate, Qt::ISODate);
+                            mainWindow->openCalendarEvent(
+                                route.calendarAccountId, route.eventId,
+                                route.recurrenceId.value_or(QString{}),
+                                navigationDate.isValid() ? navigationDate : QDate::currentDate());
+                        });
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::RestoreDraftRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);
-                    mainWindow->restoreDraft(activationRoute.accountId,
-                                             activationRoute.draftEmailId,
-                                             activationRoute.composeSessionId);
+                    afterWorkspaceRestore(
+                        [&, route = activationRoute]
+                        {
+                            mainWindow->restoreDraft(route.accountId, route.draftEmailId,
+                                                     route.composeSessionId);
+                        });
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenWorkspaceRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);
-                    if (mainWindow == nullptr)
-                        return;
-                    switch (activationRoute.section)
-                    {
-                    case javelin::protocol::WorkspaceSection::Inbox:
-                        mainWindow->openInbox();
-                        break;
-                    case javelin::protocol::WorkspaceSection::Contacts:
-                        mainWindow->openContacts();
-                        break;
-                    case javelin::protocol::WorkspaceSection::Calendar:
-                        mainWindow->openCalendar();
-                        break;
-                    }
+                    afterWorkspaceRestore(
+                        [&, section = activationRoute.section]
+                        {
+                            switch (section)
+                            {
+                            case javelin::protocol::WorkspaceSection::Inbox:
+                                mainWindow->openInbox();
+                                break;
+                            case javelin::protocol::WorkspaceSection::Contacts:
+                                mainWindow->openContacts();
+                                break;
+                            case javelin::protocol::WorkspaceSection::Calendar:
+                                mainWindow->openCalendar();
+                                break;
+                            }
+                        });
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::NewMessageRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);
-                    if (mainWindow != nullptr)
-                        mainWindow->composeNewMessage();
+                    afterWorkspaceRestore([&] { mainWindow->composeNewMessage(); });
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::ReplyMessageRoute>)
                 {
                     restoreMainWindow(activationRoute.activationToken);
-                    if (mainWindow != nullptr)
-                        mainWindow->composeReplyTo(activationRoute.accountId,
-                                                   activationRoute.emailId);
+                    afterWorkspaceRestore(
+                        [&, route = activationRoute]
+                        { mainWindow->composeReplyTo(route.accountId, route.emailId); });
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenTaskCenterRoute>)
                 {

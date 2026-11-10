@@ -193,6 +193,8 @@ namespace javelin::gui::shell
                             javelin::app::UndoCommandPort& undoCommandPort,
                             MainWindowFeatureFactories featureFactories, QWidget* parent = nullptr);
         ~MainWindow() override;
+        // Runs action once the persisted tabs exist; see MailWorkspaceController::whenRestored.
+        void whenWorkspaceRestored(std::function<void()> action);
         void openPreferencesForConnection(const QString& connectionId);
         void openMailtoUri(const QString& uri);
         void openInbox();
@@ -493,7 +495,6 @@ namespace javelin::gui::shell
         std::optional<int>& m_activeTabIndex;
         std::vector<TabState>& m_tabs;
         bool m_modelUpdateInProgress = false;
-        bool m_restoringPersistentState = false;
         std::unique_ptr<ClosedTabState> m_lastClosedTab;
         javelin::gui::developer::DeveloperOptionsDialog* m_developerOptionsDialog = nullptr;
         std::optional<std::string> m_pendingInitialMailboxAccountId;

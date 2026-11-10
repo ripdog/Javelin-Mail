@@ -194,3 +194,53 @@ TEST_CASE("home mailbox activation keeps a leading tab that is not a mailbox",
     CHECK(contacts->title == QStringLiteral("Contacts"));
     CHECK(workspace.activeIndex() == std::optional<int>{0});
 }
+
+TEST_CASE("home mailbox activation waits for a restore and reuses the restored home tab",
+          "[gui][mail-workspace][restore]")
+{
+    IdleMaterializationPort materialization;
+    FakeMailEvents events;
+    RecordingSessionFactory factory{materialization, events};
+    QObject sessionParent;
+    javelin::gui::shell::MailWorkspaceController workspace{factory, 100, &sessionParent};
+
+    // A notification activation can arrive while the restore awaits the daemon.
+    workspace.prepareRestore(2);
+    CHECK(workspace.restoring());
+    std::optional<int> activatedIndex;
+    workspace.whenRestored(
+        [&]
+        {
+            activatedIndex = workspace.activateHomeMailbox(
+                "account-1", "inbox", QStringLiteral("Inbox"), std::optional<std::string>{"inbox"});
+        });
+    CHECK_FALSE(activatedIndex.has_value());
+    CHECK(workspace.tabs().empty());
+
+    CHECK(workspace.restoreMailbox({.accountId = "account-1",
+                                    .mailboxId = "inbox",
+                                    .title = QStringLiteral("Inbox"),
+                                    .role = std::optional<std::string>{"inbox"},
+                                    .sort = {},
+                                    .restored = std::nullopt}) == 0);
+    CHECK(workspace.restoreMailbox({.accountId = "account-1",
+                                    .mailboxId = "archive",
+                                    .title = QStringLiteral("Archive"),
+                                    .role = std::optional<std::string>{"archive"},
+                                    .sort = {},
+                                    .restored = std::nullopt}) == 1);
+    workspace.finishRestore();
+
+    CHECK_FALSE(workspace.restoring());
+    CHECK(activatedIndex == std::optional<int>{0});
+    REQUIRE(workspace.tabs().size() == 2);
+    const auto* home =
+        std::get_if<javelin::gui::shell::MailboxTabState>(&workspace.tabs()[0].content);
+    REQUIRE(home != nullptr);
+    CHECK(home->session->mailboxId() == "inbox");
+    CHECK(factory.mailboxCreateCount == 2);
+
+    bool ranImmediately = false;
+    workspace.whenRestored([&] { ranImmediately = true; });
+    CHECK(ranImmediately);
+}

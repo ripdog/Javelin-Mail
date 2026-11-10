@@ -81,6 +81,29 @@ namespace javelin::gui::shell
         m_tabs.clear();
         m_tabs.reserve(tabCount);
         m_activeIndex.reset();
+        m_restoring = true;
+    }
+
+    void MailWorkspaceController::finishRestore()
+    {
+        m_restoring = false;
+        for (auto& action : std::exchange(m_afterRestore, {}))
+            action();
+    }
+
+    bool MailWorkspaceController::restoring() const
+    {
+        return m_restoring;
+    }
+
+    void MailWorkspaceController::whenRestored(std::function<void()> action)
+    {
+        if (m_restoring)
+        {
+            m_afterRestore.push_back(std::move(action));
+            return;
+        }
+        action();
     }
 
     int MailWorkspaceController::openMailbox(std::string accountId, std::string mailboxId,

@@ -4240,9 +4240,12 @@ namespace javelin::gui::shell
 
     void MainWindow::restorePersistentState()
     {
-        // Saving before the restore finishes would drop the tabs that are not recreated yet.
-        m_restoringPersistentState = true;
         QCoro::connect(restorePersistentStateAsync(), this, [] {});
+    }
+
+    void MainWindow::whenWorkspaceRestored(std::function<void()> action)
+    {
+        m_mailWorkspaceController->whenRestored(std::move(action));
     }
 
     QCoro::Task<> MainWindow::restorePersistentStateAsync()
@@ -4284,7 +4287,6 @@ namespace javelin::gui::shell
             if (!self)
                 co_return;
         }
-        m_restoringPersistentState = false;
 
         std::vector<std::optional<int>> restoredTabIndices;
         restoredTabIndices.reserve(state.tabs.size());
@@ -4336,6 +4338,7 @@ namespace javelin::gui::shell
                 activateMailboxSelection(true);
                 break;
             }
+            m_mailWorkspaceController->finishRestore();
             co_return;
         }
 
@@ -4343,6 +4346,7 @@ namespace javelin::gui::shell
             resolveRestoredActiveTabIndex(state.activeTabIndex, restoredTabIndices).value_or(0));
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
+        m_mailWorkspaceController->finishRestore();
     }
 
     void MainWindow::restoreMailboxTab(const PersistedMailboxTab& tab)
@@ -4384,7 +4388,8 @@ namespace javelin::gui::shell
 
     void MainWindow::savePersistentState() const
     {
-        if (m_restoringPersistentState)
+        // Saving before the restore finishes would drop the tabs that are not recreated yet.
+        if (m_mailWorkspaceController->restoring())
             return;
         PersistedMainWindowState state{
             .geometry = saveGeometry(),

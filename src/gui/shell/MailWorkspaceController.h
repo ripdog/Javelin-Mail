@@ -9,6 +9,7 @@
 #include <QString>
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -41,7 +42,13 @@ namespace javelin::gui::shell
         [[nodiscard]] MessageListTabController& messageListTabs();
         [[nodiscard]] bool ownsActiveSession(const javelin::app::MessageListSession* session) const;
         [[nodiscard]] bool promoteSearch(TabState& tab);
+        // Clears the workspace for a restore of the persisted tabs; finishRestore ends it.
         void prepareRestore(std::size_t tabCount);
+        void finishRestore();
+        [[nodiscard]] bool restoring() const;
+        // Runs action now, or once the restore finishes. Work that opens or reuses tabs must wait,
+        // or its tab lands ahead of the restored ones and displaces the home tab.
+        void whenRestored(std::function<void()> action);
 
         [[nodiscard]] int openMailbox(std::string accountId, std::string mailboxId, QString title,
                                       std::optional<std::string> role,
@@ -79,5 +86,7 @@ namespace javelin::gui::shell
         std::optional<int> m_activeIndex;
         javelin::jmap::query::EmailListSort m_sort;
         MessageListTabController m_messageListTabs;
+        bool m_restoring = false;
+        std::vector<std::function<void()>> m_afterRestore;
     };
 } // namespace javelin::gui::shell
